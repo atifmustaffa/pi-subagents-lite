@@ -33,7 +33,7 @@ The per-project override file `.pi/subagents-lite.json` in a trusted project. Ho
 _Avoid_: Project settings, local config
 
 **Model override**:
-A user-configured model preference (per-type or global) set at session, global, or project level. A session per-type **Model override** beats every other source; a session default beats config per-type overrides and frontmatter models; the config default key applies only to types with no session default, no per-type override, and no frontmatter model. Set via `/agents` > Model settings.
+A model preference for a Subagent. It may be supplied explicitly per spawn through the Agent tool, or configured per-type/global at session, project, or global level. An explicit per-call model wins for that spawn; otherwise the existing configured precedence applies. Persistent overrides are set via `/agents` > Model settings.
 _Avoid_: Model injection, model preference
 
 **Grace turns**:
@@ -41,7 +41,7 @@ Additional turns allowed after the soft turn limit steer message before hard abo
 _Avoid_: Grace period, extra turns
 
 **Resolved model**:
-The model an Agent type runs on: session per-type > session default > config per-type (project over global) > config default (project over global) > the frontmatter model > the parent session's current model.
+The model a Subagent runs on: explicit per-call model > session per-type > session default > config per-type (project over global) > config default (project over global) > the frontmatter model > the parent session's current model.
 _Avoid_: Effective model, assigned model
 
 **Thinking level**:
