@@ -310,11 +310,15 @@ export async function toolCallListener(event: ToolCallEvent, ctx: ExtensionConte
 
   const parentModelId = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "";
 
-  const effectiveModel = getStore().modelFor(subagentType ?? "general-purpose", parentModelId, agentConfig);
+  const explicitModel = typeof input.model === "string" && input.model.trim() ? input.model : undefined;
+  const effectiveModel =
+    explicitModel ?? getStore().modelFor(subagentType ?? "general-purpose", parentModelId, agentConfig);
 
   if (effectiveModel) {
-    input.model = effectiveModel;
-    // Always inject _modelOverride for renderCall
+    // Preserve an explicit per-call model; otherwise inject the configured/default model.
+    if (!explicitModel) input.model = effectiveModel;
+
+    // Always inject _modelOverride for renderCall.
     const parsed = parseModelKey(effectiveModel);
     if (parsed) {
       input._modelOverride = parsed.modelId;
