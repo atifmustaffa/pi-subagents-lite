@@ -51,13 +51,15 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       prompt: Type.String(),
       description: optional(Type.String()),
       agent: optional(agentType),
+      model: optional(Type.String()),
+      thinking: optional(Type.String()),
       run_in_background: optional(Type.Boolean()),
       worktree_path: optional(Type.String()),
     },
     useConstrained
       ? {
           additionalProperties: false,
-          required: ["prompt", "description", "agent", "run_in_background", "worktree_path"],
+          required: ["prompt", "description", "agent", "model", "thinking", "run_in_background", "worktree_path"],
         }
       : { additionalProperties: false },
   );
