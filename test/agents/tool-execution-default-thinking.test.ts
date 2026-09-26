@@ -313,6 +313,31 @@ describe("toolCallListener — thinking injection (frontmatter > per-model > def
     expect(vi.mocked(getPiModelThinkingLevel)).not.toHaveBeenCalled();
   });
 
+  it("keeps an explicit per-call model instead of overwriting it with configured model", async () => {
+    storeState.modelFor = "anthropic/claude-opus-4-1";
+    const event = makeEvent({ model: "openai/gpt-5.6-luna", thinking: "xhigh" });
+
+    await toolCallListener(event, fakeCtx());
+
+    expect(event.input.model).toBe("openai/gpt-5.6-luna");
+    expect(event.input._modelOverride).toBe("gpt-5.6-luna");
+  });
+
+  it("uses an explicit per-call model when resolving per-model thinking", async () => {
+    storeState.modelFor = "anthropic/claude-opus-4-1";
+    perModelState.value = "xhigh";
+    const event = makeEvent({ model: "openai/gpt-5.6-luna" });
+
+    await toolCallListener(event, fakeCtx());
+
+    expect(vi.mocked(getPiModelThinkingLevel)).toHaveBeenCalledWith(
+      "/home/test/project",
+      "openai",
+      "gpt-5.6-luna",
+    );
+    expect(event.input.thinking).toBe("xhigh");
+  });
+
   it("leaves thinking undefined when nothing is configured (inherit parent)", async () => {
     const event = makeEvent();
 
