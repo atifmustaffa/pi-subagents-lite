@@ -216,7 +216,15 @@ describe("Agent tool schema — minimal", () => {
 
   it("exposes exactly the documented param set, each without a description", () => {
     const props = agentTool()!.parameters.properties as Record<string, SchemaJson>;
-    expect(Object.keys(props).sort()).toEqual(["agent", "description", "prompt", "run_in_background", "worktree_path"]);
+    expect(Object.keys(props).sort()).toEqual([
+      "agent",
+      "description",
+      "model",
+      "prompt",
+      "run_in_background",
+      "thinking",
+      "worktree_path",
+    ]);
     // Params carry no description: the model learns them from the tool name alone.
     expect(props.prompt.description).toBeUndefined();
     expect(props.worktree_path.description).toBeUndefined();
@@ -526,6 +534,8 @@ describe("constrained sampling — toggle ON", () => {
     expect(required).toContain("prompt");
     expect(required).toContain("description");
     expect(required).toContain("agent");
+    expect(required).toContain("model");
+    expect(required).toContain("thinking");
     expect(required).toContain("run_in_background");
     expect(required).toContain("worktree_path");
   });
@@ -533,7 +543,7 @@ describe("constrained sampling — toggle ON", () => {
   it("Agent optional fields use nullable anyOf pattern when toggle is ON", () => {
     const tool = findTool(api, "Agent");
     const props = tool!.parameters.properties as Record<string, SchemaJson>;
-    for (const name of ["description", "agent", "run_in_background", "worktree_path"]) {
+    for (const name of ["description", "agent", "model", "thinking", "run_in_background", "worktree_path"]) {
       // Real TypeBox emits { anyOf: [...] } for Type.Union (no `type` field).
       const anyOf = props[name]!.anyOf;
       expect(anyOf).toBeDefined();
