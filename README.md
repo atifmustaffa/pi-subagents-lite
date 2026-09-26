@@ -112,10 +112,12 @@ Tool and extension lists accept built-in names (`read`, `bash`, `edit`, `write`,
 - `prompt` (required) is the task text.
 - `description` is a short label for the widget; defaults to the first line of the prompt.
 - `agent` is the agent type; defaults to `general-purpose`.
+- `model` optionally selects a model for this spawn using `"provider/model-id"`.
+- `thinking` optionally selects the reasoning level for this spawn: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
 - `run_in_background` makes the agent return immediately and notify the parent when complete.
 - `worktree_path` is any git repository on disk: a worktree of the parent's repo, its main checkout, or a different repo entirely. See [Worktree paths and trust](#worktree-paths-and-trust).
 
-`model`, `thinking`, `max_turns`, and `max_tokens` are injected from config and frontmatter, never passed by the LLM. Set them once and forget.
+Explicit per-call `model` and `thinking` values win for that spawn. When omitted, the existing config/frontmatter/default resolution is unchanged. `max_turns` and `max_tokens` remain config/frontmatter-driven.
 
 Subagents cannot spawn further subagents.
 
@@ -129,12 +131,13 @@ Cross-repo targets are gated by pi's existing trust framework. The target's save
 
 Precedence, highest first:
 
-1. Session per-type override (`/agents` > Model settings)
-2. Session global default
-3. Config per-type override (`~/.pi/agent/subagents-lite.json`)
-4. Config global default
-5. Agent frontmatter `model`
-6. Parent model
+1. Explicit per-call `model` from the `Agent` tool
+2. Session per-type override (`/agents` > Model settings)
+3. Session global default
+4. Config per-type override (`~/.pi/agent/subagents-lite.json`)
+5. Config global default
+6. Agent frontmatter `model`
+7. Parent model
 
 ## Concurrency
 
