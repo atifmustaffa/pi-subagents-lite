@@ -317,13 +317,13 @@ describe("message renderer registration", () => {
 /* ------------------------------------------------------------------ */
 
 describe("tool registration", () => {
-  it("registers Agent, StopAgent, and AgentStatus tools", () => {
+  it("registers all agent tools", () => {
     const names = api.tools.map((t) => t.name);
-    expect(names).toEqual(["Agent", "StopAgent", "AgentStatus"]);
+    expect(names).toEqual(["Agent", "StopAgent", "ContinueAgent", "AgentStatus"]);
   });
 
   it("registers every tool with the dot description", () => {
-    for (const toolName of ["Agent", "StopAgent", "AgentStatus"]) {
+    for (const toolName of ["Agent", "StopAgent", "ContinueAgent", "AgentStatus"]) {
       expect(findTool(api, toolName)!.description).toBe(".");
     }
   });
@@ -487,13 +487,19 @@ describe("constrained sampling — default OFF", () => {
     });
   });
 
-  for (const toolName of ["StopAgent", "AgentStatus"]) {
+  for (const toolName of ["StopAgent", "ContinueAgent", "AgentStatus"]) {
     it(`${toolName} schema has additionalProperties: false`, () => {
       const tool = findTool(api, toolName);
       expect(tool).toBeDefined();
       expect((tool!.parameters as SchemaJson).additionalProperties).toBe(false);
     });
   }
+
+  it("ContinueAgent requires agent_id and prompt", () => {
+    const tool = findTool(api, "ContinueAgent");
+    expect(tool!.parameters.required).toEqual(["agent_id", "prompt"]);
+    expect(tool!.constrainedSampling).toEqual({ type: "json_schema", strict: "prefer" });
+  });
 
   it("AgentStatus does not have constrainedSampling", () => {
     const tool = findTool(api, "AgentStatus");

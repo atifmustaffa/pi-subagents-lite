@@ -249,6 +249,46 @@ export async function executeAgentTool(
   return successResult(formatResultContent(record), details);
 }
 
+export async function executeContinueAgentTool(
+  _toolCallId: string,
+  params: Record<string, unknown>,
+  _signal: AbortSignal | undefined,
+  _onUpdate: ((update: any) => void) | undefined,
+  _ctx: ExtensionContext,
+): Promise<any> {
+  const agentId = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
+  const prompt = typeof params.prompt === "string" ? params.prompt : "";
+
+  if (!agentId) throw new Error("agent_id is required");
+  if (!prompt.trim()) throw new Error("prompt is required");
+
+  const manager = getManager()!;
+  const record = manager.getRecord(agentId);
+  if (!record) throw new Error(`Agent ${agentId} not found`);
+
+  if (record.lifecycle.status === "running" || record.lifecycle.status === "queued") {
+    throw new Error(`Agent ${agentId} cannot be continued while ${record.lifecycle.status}`);
+  }
+  if (!record.execution.settled) {
+    throw new Error(`Agent ${agentId} cannot be continued while its previous run is settling`);
+  }
+  if (!record.execution.session) {
+    throw new Error(`Agent ${agentId} cannot be continued because its session is unavailable`);
+  }
+  if (record.execution.session.isStreaming) {
+    throw new Error(`Agent ${agentId} cannot be continued while its session is streaming`);
+  }
+
+  if (!(await manager.steer(agentId, prompt))) {
+    throw new Error(`Agent ${agentId} cannot be continued because its model concurrency limit is full`);
+  }
+
+  return successResult(`Continued agent ${agentId.slice(0, SHORT_ID_LENGTH)}`, {
+    agentId,
+    status: record.lifecycle.status,
+  });
+}
+
 // --- Running agents list helper (used by executeStopAgentTool) ---
 
 /**
