@@ -8,6 +8,7 @@ import {
   isSymlink,
   parseModelKey,
   parseThinkingLevel,
+  resolveRequestedModel,
   safeReadFile,
   summarizeToolArgs,
 } from "../src/utils.js";
@@ -220,6 +221,75 @@ describe("findModelInRegistry", () => {
     expect(findModelInRegistry("openai/gpt", registry, fallback)).toBe(fallback);
     expect(findModelInRegistry("nope", registry, fallback)).toBe(fallback);
     expect(findModelInRegistry(undefined, registry, fallback)).toBe(fallback);
+  });
+});
+
+describe("resolveRequestedModel", () => {
+  function makeRequestedModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
+    return {
+      id: "claude",
+      name: "Claude",
+      api: "anthropic-messages",
+      provider: "anthropic",
+      baseUrl: "https://api.anthropic.com/v1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200_000,
+      maxTokens: 8_192,
+      ...overrides,
+    };
+  }
+
+  const models = [
+    {
+      id: "gpt-5.6-luna",
+      name: "GPT-5.6 Luna",
+      provider: "openai-codex",
+    },
+    {
+      id: "gpt-6-luna",
+      name: "GPT-6 Luna",
+      provider: "openai-codex",
+    },
+    {
+      id: "gpt-5.6-sol",
+      name: "GPT-5.6 Sol",
+      provider: "openai-codex",
+    },
+  ].map((model) =>
+    makeRequestedModel({
+      ...model,
+      api: "openai-responses",
+    }),
+  );
+  const registry = {
+    find: (provider: string, modelId: string) =>
+      models.find((model) => model.provider === provider && model.id === modelId),
+    getAvailable: () => models,
+  };
+  const fallback = makeRequestedModel({ id: "parent", name: "Parent", provider: "fallback" });
+
+  it("resolves exact qualified model IDs", () => {
+    expect(resolveRequestedModel("openai-codex/gpt-5.6-luna", registry, fallback)).toBe(models[0]);
+  });
+
+  it.each(["gpt-5.6-luna", "GPT-5.6 Luna", "5.6-Luna"])("resolves the friendly model name %s", (query) => {
+    expect(resolveRequestedModel(query, registry, fallback)).toBe(models[0]);
+  });
+
+  it("rejects ambiguous friendly names with candidates", () => {
+    expect(() => resolveRequestedModel("Luna", registry, fallback)).toThrow(
+      "Ambiguous model: Luna. Candidates: openai-codex/gpt-5.6-luna, openai-codex/gpt-6-luna",
+    );
+  });
+
+  it("rejects unknown explicit models instead of falling back", () => {
+    expect(() => resolveRequestedModel("missing", registry, fallback)).toThrow("Unknown model: missing");
+  });
+
+  it.each([undefined, null, "", "   "])("inherits the parent model when omitted (%s)", (value) => {
+    expect(resolveRequestedModel(value, registry, fallback)).toBe(fallback);
   });
 });
 

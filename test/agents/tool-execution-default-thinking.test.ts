@@ -37,6 +37,7 @@ const {
   mockDiscoverNewAgents,
   mockValidateWorktreePath,
   mockResolveSubagentTrust,
+  mockResolveRequestedModel,
   storeState,
   perModelState,
 } = vi.hoisted(() => ({
@@ -49,6 +50,7 @@ const {
     error: "no validation result configured",
   })),
   mockResolveSubagentTrust: vi.fn<() => boolean>(() => true),
+  mockResolveRequestedModel: vi.fn(),
   storeState: {
     defaultThinking: undefined as string | undefined,
     defaultMaxTurns: undefined as number | undefined,
@@ -101,7 +103,7 @@ vi.mock("../../src/utils.js", () => ({
     const idx = value.indexOf("/");
     return idx <= 0 ? null : { provider: value.slice(0, idx), modelId: value.slice(idx + 1) };
   }),
-  findModelInRegistry: vi.fn(() => undefined),
+  resolveRequestedModel: mockResolveRequestedModel,
   // Faithful to the real parser: valid levels pass through, everything else is undefined.
   parseThinkingLevel: vi.fn((raw?: string) => (raw !== undefined && VALID_THINKING.includes(raw) ? raw : undefined)),
 }));
@@ -174,6 +176,7 @@ beforeEach(() => {
   // clearAllMocks keeps implementations; reset the stateful ones explicitly.
   mockValidateWorktreePath.mockReset();
   mockResolveSubagentTrust.mockReset().mockReturnValue(true);
+  mockResolveRequestedModel.mockReset().mockReturnValue(undefined);
   storeState.defaultThinking = undefined;
   storeState.defaultMaxTurns = undefined;
   storeState.modelFor = undefined;
@@ -321,6 +324,17 @@ describe("toolCallListener — thinking injection (frontmatter > per-model > def
 
     expect(event.input.model).toBe("openai/gpt-5.6-luna");
     expect(event.input._modelOverride).toBe("gpt-5.6-luna");
+  });
+
+  it("canonicalizes a friendly explicit model before resolving thinking", async () => {
+    mockResolveRequestedModel.mockReturnValue({ provider: "openai-codex", id: "gpt-5.6-luna" });
+    const event = makeEvent({ model: "5.6-Luna", thinking: "low" });
+
+    await toolCallListener(event, fakeCtx());
+
+    expect(event.input.model).toBe("openai-codex/gpt-5.6-luna");
+    expect(event.input._modelOverride).toBe("gpt-5.6-luna");
+    expect(event.input.thinking).toBe("low");
   });
 
   it("uses an explicit per-call model when resolving per-model thinking", async () => {

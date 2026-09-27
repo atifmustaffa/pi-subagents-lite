@@ -69,7 +69,7 @@ vi.mock("../../src/agents/agent-types.js", () => ({
 
 vi.mock("../../src/utils.js", () => ({
   parseModelKey: vi.fn(() => null),
-  findModelInRegistry: vi.fn(() => null),
+  resolveRequestedModel: vi.fn(() => null),
   parseThinkingLevel: vi.fn(() => undefined),
 }));
 

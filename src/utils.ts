@@ -68,6 +68,64 @@ export function parseModelKey(value: unknown): { provider: string; modelId: stri
   return { provider: value.slice(0, slashIdx), modelId: value.slice(slashIdx + 1) };
 }
 
+function normalizeModelName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/** Resolve an explicit Agent tool model name; only omission inherits the parent model. */
+export function resolveRequestedModel(
+  value: unknown,
+  registry: {
+    find(provider: string, modelId: string): Model<any> | undefined;
+    getAvailable(): Model<any>[];
+  },
+  fallback: Model<any> | undefined,
+): Model<any> | undefined {
+  if (value === undefined || value === null || (typeof value === "string" && !value.trim())) return fallback;
+  if (typeof value !== "string") throw new Error("Model must be a string");
+
+  const query = value.trim();
+  const parsed = parseModelKey(query);
+  if (parsed) {
+    const exact = registry.find(parsed.provider, parsed.modelId);
+    if (exact) return exact;
+
+    const qualified = query.toLowerCase();
+    const match = registry.getAvailable().find((model) => `${model.provider}/${model.id}`.toLowerCase() === qualified);
+    if (match) return match;
+    throw new Error(`Unknown model: ${query}`);
+  }
+
+  const lowerQuery = query.toLowerCase();
+  const normalizedQuery = normalizeModelName(query);
+  if (!normalizedQuery) throw new Error(`Unknown model: ${query}`);
+
+  const scored = registry.getAvailable().flatMap((model) => {
+    const names = [model.id, model.name, `${model.provider}/${model.id}`].filter(
+      (name): name is string => typeof name === "string",
+    );
+    let score = Number.POSITIVE_INFINITY;
+    for (const name of names) {
+      const lowerName = name.toLowerCase();
+      const normalizedName = normalizeModelName(name);
+      if (lowerName === lowerQuery) score = Math.min(score, 0);
+      else if (normalizedName === normalizedQuery) score = Math.min(score, 1);
+      else if (normalizedName.endsWith(normalizedQuery)) score = Math.min(score, 2);
+      else if (normalizedName.includes(normalizedQuery)) score = Math.min(score, 3);
+    }
+    return Number.isFinite(score) ? [{ model, score }] : [];
+  });
+
+  const bestScore = Math.min(...scored.map(({ score }) => score));
+  const matches = scored.filter(({ score }) => score === bestScore).map(({ model }) => model);
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    const candidates = matches.map((model) => `${model.provider}/${model.id}`).join(", ");
+    throw new Error(`Ambiguous model: ${query}. Candidates: ${candidates}`);
+  }
+  throw new Error(`Unknown model: ${query}`);
+}
+
 /** Find a model by "provider/model-id"; fallback if unparseable or not in registry. */
 export function findModelInRegistry(
   value: unknown,

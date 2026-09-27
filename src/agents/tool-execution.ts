@@ -16,7 +16,7 @@ import { resolveType, getAgentConfig, resolveTypeOrDiscover, type TypeResolution
 import { getSessionContextPercent } from "./usage.js";
 import { computeSpawnTarget, surfaceSpawnTargetWarnings } from "../spawn/spawn-target.js";
 
-import { parseModelKey, findModelInRegistry, parseThinkingLevel } from "../utils.js";
+import { parseModelKey, resolveRequestedModel, parseThinkingLevel } from "../utils.js";
 import { resolveThinkingLevel } from "../models/thinking-resolution.js";
 import { getPiModelThinkingLevel } from "../pi-settings.js";
 import { getPiInstance, getStore, getCoordinator, getManager } from "../shell.js";
@@ -187,7 +187,7 @@ export async function executeAgentTool(
     getStore().agent.defaultMaxTurns;
 
   const modelStr = params.model as string | undefined;
-  const model = findModelInRegistry(modelStr, ctx.modelRegistry, ctx.model);
+  const model = resolveRequestedModel(modelStr, ctx.modelRegistry, ctx.model);
   const modelKey = model ? `${model.provider}/${model.id}` : undefined;
 
   // Determine modelName for invocation (always capture for display)
@@ -359,12 +359,18 @@ export async function toolCallListener(event: ToolCallEvent, ctx: ExtensionConte
   const parentModelId = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "";
 
   const explicitModel = typeof input.model === "string" && input.model.trim() ? input.model : undefined;
-  const effectiveModel =
+  let effectiveModel =
     explicitModel ?? getStore().modelFor(subagentType ?? "general-purpose", parentModelId, agentConfig);
 
   if (effectiveModel) {
-    // Preserve an explicit per-call model; otherwise inject the configured/default model.
-    if (!explicitModel) input.model = effectiveModel;
+    try {
+      const resolved = resolveRequestedModel(effectiveModel, ctx.modelRegistry, ctx.model);
+      if (resolved) effectiveModel = `${resolved.provider}/${resolved.id}`;
+    } catch {
+      // Execution reports unknown or ambiguous explicit models as tool errors.
+    }
+
+    input.model = effectiveModel;
 
     // Always inject _modelOverride for renderCall.
     const parsed = parseModelKey(effectiveModel);
