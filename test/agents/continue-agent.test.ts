@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shellMock } from "../fixtures.js";
 import { asExtensionContext } from "../pi-boundaries.js";
 
-const { mockGetRecord, mockSteer } = vi.hoisted(() => ({
+const { mockGetRecord, mockListAgents, mockSteer } = vi.hoisted(() => ({
   mockGetRecord: vi.fn(),
+  mockListAgents: vi.fn(),
   mockSteer: vi.fn(),
 }));
 
@@ -11,6 +12,7 @@ vi.mock("../../src/shell.js", () =>
   shellMock({
     manager: {
       getRecord: mockGetRecord,
+      listAgents: mockListAgents,
       steer: mockSteer,
     },
   }),
@@ -30,6 +32,7 @@ function settledRecord(overrides: Record<string, unknown> = {}) {
 describe("executeContinueAgentTool", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockListAgents.mockReturnValue([]);
   });
 
   it.each([
@@ -54,6 +57,39 @@ describe("executeContinueAgentTool", () => {
         asExtensionContext({}),
       ),
     ).rejects.toThrow("Agent missing not found");
+    expect(mockSteer).not.toHaveBeenCalled();
+  });
+
+  it("resolves the short IDs exposed by AgentStatus", async () => {
+    const record = settledRecord();
+    mockGetRecord.mockReturnValue(undefined);
+    mockListAgents.mockReturnValue([record]);
+    mockSteer.mockResolvedValue(true);
+
+    await executeContinueAgentTool(
+      "call_short",
+      { agent_id: "abc123de", prompt: "delete hello.txt" },
+      undefined,
+      undefined,
+      asExtensionContext({}),
+    );
+
+    expect(mockSteer).toHaveBeenCalledWith(record.id, "delete hello.txt");
+  });
+
+  it("rejects ambiguous short IDs", async () => {
+    mockGetRecord.mockReturnValue(undefined);
+    mockListAgents.mockReturnValue([settledRecord({ id: "abc123de-1111" }), settledRecord({ id: "abc123de-2222" })]);
+
+    await expect(
+      executeContinueAgentTool(
+        "call_ambiguous",
+        { agent_id: "abc123de", prompt: "continue" },
+        undefined,
+        undefined,
+        asExtensionContext({}),
+      ),
+    ).rejects.toThrow("Agent ID abc123de is ambiguous");
     expect(mockSteer).not.toHaveBeenCalled();
   });
 

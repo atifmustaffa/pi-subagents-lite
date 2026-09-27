@@ -256,15 +256,23 @@ export async function executeContinueAgentTool(
   _onUpdate: ((update: any) => void) | undefined,
   _ctx: ExtensionContext,
 ): Promise<any> {
-  const agentId = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
+  const requestedAgentId = typeof params.agent_id === "string" ? params.agent_id.trim() : "";
   const prompt = typeof params.prompt === "string" ? params.prompt : "";
 
-  if (!agentId) throw new Error("agent_id is required");
+  if (!requestedAgentId) throw new Error("agent_id is required");
   if (!prompt.trim()) throw new Error("prompt is required");
 
   const manager = getManager()!;
-  const record = manager.getRecord(agentId);
-  if (!record) throw new Error(`Agent ${agentId} not found`);
+  let record = manager.getRecord(requestedAgentId);
+  if (!record && requestedAgentId.length >= SHORT_ID_LENGTH) {
+    const matches = manager.listAgents().filter((agent) => agent.id.startsWith(requestedAgentId));
+    if (matches.length > 1) {
+      throw new Error(`Agent ID ${requestedAgentId} is ambiguous`);
+    }
+    record = matches[0];
+  }
+  if (!record) throw new Error(`Agent ${requestedAgentId} not found`);
+  const agentId = record.id;
 
   if (record.lifecycle.status === "running" || record.lifecycle.status === "queued") {
     throw new Error(`Agent ${agentId} cannot be continued while ${record.lifecycle.status}`);
