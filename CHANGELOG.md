@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **`ContinueAgent` tool for reusing settled subagents.** Parent LLMs can prompt an existing agent by ID through the same continuation path used by manual steering, preserving its session, context, model, thinking configuration, stats, and identity without spawning a replacement.
-
 ## [1.15.0] - 2026-09-24
 
 ### Changed
