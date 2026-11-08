@@ -5,7 +5,7 @@
  *   - shellMock: ../src/shell.js stubs (parameterized by hoisted fns)
  */
 
-import { vi, type Mock } from "vitest";
+import { vi, type Mock } from "vite-plus/test";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -16,6 +16,13 @@ import { shallowMerge, defaultUi, defaultSessionManager, defaultModel, defaultMo
 import type { TObject } from "typebox";
 import { asExtensionAPI } from "./pi-boundaries.js";
 import type { AgentManager } from "../src/agents/agent-manager.js";
+import type {
+  AgentAccumulatedStats,
+  AgentDisplayInfo,
+  AgentExecutionState,
+  AgentLifecycle,
+  AgentRecord,
+} from "../src/types.js";
 import type { SubagentsConfig } from "../src/models/model-precedence.js";
 import type { SpawnCoordinator } from "../src/spawn/spawn-coordinator.js";
 import type { AgentWidget } from "../src/ui/agent-widget.js";
@@ -26,6 +33,45 @@ import type { AgentWidget } from "../src/ui/agent-widget.js";
 /*  Each test file keeps its own vi.mock("path", factory) line;       */
 /*  only the factory BODY is deduplicated here.                       */
 /* ================================================================== */
+
+/* ------------------------------------------------------------------ */
+/*  Agent record factory                                              */
+/* ------------------------------------------------------------------ */
+
+/** Partial overrides for makeAgentRecord; each sub-object merges into the base. */
+export interface AgentRecordOverrides extends Partial<Pick<AgentRecord, "id" | "result" | "error">> {
+  lifecycle?: Partial<AgentLifecycle>;
+  display?: Partial<AgentDisplayInfo>;
+  execution?: Partial<AgentExecutionState>;
+  stats?: Partial<AgentAccumulatedStats>;
+}
+
+/**
+ * A real AgentRecord with realistic field shapes (the id is the 17-character
+ * length AgentManager stores). Pass overrides for the fields a test cares about.
+ */
+export function makeAgentRecord(overrides: AgentRecordOverrides = {}): AgentRecord {
+  const base: AgentRecord = {
+    id: "11111111-2222-400",
+    lifecycle: { status: "running", startedAt: 1000, started: true },
+    display: { type: "builder", description: "Test agent" },
+    execution: { settled: true, settlementCount: 1 },
+    stats: {
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+      toolUses: 0,
+      turnCount: 1,
+      compactionCount: 0,
+    },
+  };
+  return {
+    ...base,
+    ...overrides,
+    lifecycle: { ...base.lifecycle, ...overrides.lifecycle },
+    display: { ...base.display, ...overrides.display },
+    execution: { ...base.execution, ...overrides.execution },
+    stats: { ...base.stats, ...overrides.stats },
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  Per-test-overridable mock builders                                */
@@ -46,8 +92,6 @@ export interface ShellMockFns {
   store?: MockShellStore;
   coordinator?: Partial<SpawnCoordinator>;
   widget?: AgentWidget;
-  /** Spawn guard state for isInsideSubagentSpawn/enter/exit. */
-  spawnGuard?: { depth: number };
 }
 
 /** Mutable mock state; setters update what the getters return. */
@@ -58,7 +102,6 @@ interface ShellMockState {
   store: MockShellStore;
   coordinator: Partial<SpawnCoordinator> | null;
   widget: AgentWidget | null | undefined;
-  spawnGuard: { depth: number };
 }
 
 /**
@@ -99,7 +142,6 @@ export function shellMock(fns: ShellMockFns = {}) {
       } satisfies MockShellStore),
     coordinator: fns.coordinator ?? { spawn: vi.fn() },
     widget: fns.widget ?? undefined,
-    spawnGuard: fns.spawnGuard ?? { depth: 0 },
   };
 
   return {
@@ -123,13 +165,6 @@ export function shellMock(fns: ShellMockFns = {}) {
     },
     setCoordinator: (c: Partial<SpawnCoordinator> | null) => {
       state.coordinator = c;
-    },
-    isInsideSubagentSpawn: () => state.spawnGuard.depth > 0,
-    enterSubagentSpawn: () => {
-      state.spawnGuard.depth++;
-    },
-    exitSubagentSpawn: () => {
-      state.spawnGuard.depth--;
     },
   };
 }
@@ -417,7 +452,18 @@ export function makeAgentMd(overrides: Record<string, unknown> = {}): string {
     if (val === undefined) {
       delete fm[key];
     } else {
-      fm[key] = String(val);
+      switch (typeof val) {
+        case "string":
+        case "number":
+        case "boolean":
+        case "bigint":
+        case "symbol":
+        case "function":
+          fm[key] = String(val);
+          break;
+        default:
+          fm[key] = JSON.stringify(val) ?? "null";
+      }
     }
   }
   for (const key of skipFields) {

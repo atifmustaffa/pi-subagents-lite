@@ -1,10 +1,17 @@
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentOutputLog } from "./agents/output-file.js";
-import type { LifetimeUsage, AgentUsage } from "./agents/usage.js";
-import type { SubagentType, AgentInvocation } from "./agents/types.js";
+import type { AgentOutputLog } from "./agents/output-file.ts";
+import type { LifetimeUsage, AgentUsage } from "./agents/usage.ts";
+import type { SubagentType, AgentInvocation } from "./agents/types.ts";
 
 export type ThinkingLevel = ModelThinkingLevel;
+
+/**
+ * A configured thinking choice: a concrete level, or `parent` — the parent
+ * session's current level. `parent` never survives resolution, so it never
+ * reaches a child session, a run option, or a stored invocation record.
+ */
+export type ThinkingChoice = ThinkingLevel | "parent";
 
 export interface ToolActivity {
   type: "start" | "end";
@@ -99,7 +106,8 @@ export type StopInitiator = "user" | "agent" | "watchdog";
 
 /** Structured reason for a watchdog stop: which check fired, and the offending tool for tool kills. */
 export type WatchdogStopDetail =
-  { kind: "tool"; toolName: string; elapsedMs: number } | { kind: "idle"; elapsedMs: number };
+  | { kind: "tool"; toolName: string; elapsedMs: number }
+  | { kind: "idle"; elapsedMs: number };
 
 /**
  * Lifecycle state: when the agent started, completed, and its current status.

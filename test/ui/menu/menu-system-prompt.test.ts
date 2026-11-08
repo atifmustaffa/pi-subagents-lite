@@ -2,7 +2,7 @@
  * menu-system-prompt.test.ts — Tests for showSystemPromptMenu.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vite-plus/test";
 import fs from "node:fs";
 import type { Component, SettingItem, SettingsListTheme } from "@earendil-works/pi-tui";
 import { mockModules, resetConfig } from "../../menu-mock-setup.js";
@@ -99,6 +99,7 @@ describe("showSystemPromptMenu", () => {
     expect(ids).toContain("includeContextFiles");
     expect(ids).toContain("loadSkillsImplicitly");
     expect(ids).toContain("loadExtensionsImplicitly");
+    expect(ids).toContain("loadToolsImplicitly");
     expect(ids).not.toContain("agentToolStrictMode");
   });
 

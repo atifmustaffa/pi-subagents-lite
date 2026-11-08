@@ -10,9 +10,9 @@
  * skipped line for invalid targets.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
 import type { ExtensionCommandContext, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import type { ToolCall } from "@earendil-works/pi-ai";
+import type { JsonObject, ToolCall } from "@earendil-works/pi-ai";
 import { fakeCtx, shellMock } from "../fixtures.js";
 import { asCommandContext } from "../pi-boundaries.js";
 import type { AgentRecord } from "../../src/types.js";
@@ -37,6 +37,7 @@ const {
   mockCoordinatorSpawn: vi.fn<(pi: unknown, ctx: unknown, intent: SpawnIntent) => Promise<SpawnResult>>(async () => ({
     agentId: "agent-id-1",
     record: fakeRecord(),
+    isBackground: true,
   })),
   mockValidateWorktreePath: vi.fn(),
   mockResolveSubagentTrust: vi.fn(() => true),
@@ -136,7 +137,7 @@ function messageEntry(id: string, role: "user" | "assistant", content: unknown[]
   } as SessionMessageEntry;
 }
 
-function agentToolCall(args: Record<string, unknown>): ToolCall {
+function agentToolCall(args: JsonObject): ToolCall {
   return {
     type: "toolCall",
     id: `tc-${Math.random().toString(36).slice(2, 8)}`,
@@ -145,7 +146,7 @@ function agentToolCall(args: Record<string, unknown>): ToolCall {
   };
 }
 
-function entriesWithCalls(calls: Record<string, unknown>[]): SessionMessageEntry[] {
+function entriesWithCalls(calls: JsonObject[]): SessionMessageEntry[] {
   return [messageEntry("a1", "assistant", calls.map(agentToolCall))];
 }
 

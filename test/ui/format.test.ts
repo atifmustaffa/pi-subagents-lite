@@ -9,7 +9,7 @@
  * hidden) from the type registry, falling back to name / "Agent".
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vite-plus/test";
 import {
   buildStatsParts,
   getDisplayName,
@@ -110,6 +110,15 @@ describe("buildStatsParts — visible flag: showContext", () => {
     const parts = buildStatsParts(allStats, mockTheme);
     expect(parts.some((p) => p.includes("%"))).toBe(true);
     expect(parts.some((p) => p.includes("↻"))).toBe(true);
+  });
+
+  it("shows context annotation when input and output tokens are hidden", () => {
+    const parts = buildStatsParts(allStats, mockTheme, {
+      showInput: false,
+      showOutput: false,
+      showContext: true,
+    });
+    expect(parts.find((part) => part.includes("%"))).toBe("50% ↻ 2");
   });
 });
 

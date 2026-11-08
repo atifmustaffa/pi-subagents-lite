@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import { writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -7,7 +7,7 @@ import {
   isUnsafeName,
   isSymlink,
   parseModelKey,
-  parseThinkingLevel,
+  parseThinkingChoice,
   resolveRequestedModel,
   safeReadFile,
   summarizeToolArgs,
@@ -164,14 +164,19 @@ describe("errorMessage", () => {
     expect(errorMessage(err)).toBe("leading and trailing");
   });
 });
-describe("parseThinkingLevel", () => {
+describe("parseThinkingChoice", () => {
   it("narrows a valid level string", () => {
-    expect(parseThinkingLevel("high")).toBe("high");
+    expect(parseThinkingChoice("high")).toBe("high");
+  });
+
+  it("narrows the `parent` value", () => {
+    expect(parseThinkingChoice("parent")).toBe("parent");
   });
 
   it("returns undefined for an invalid level or undefined input", () => {
-    expect(parseThinkingLevel("ultra")).toBeUndefined();
-    expect(parseThinkingLevel(undefined)).toBeUndefined();
+    expect(parseThinkingChoice("ultra")).toBeUndefined();
+    expect(parseThinkingChoice("inherit")).toBeUndefined();
+    expect(parseThinkingChoice(undefined)).toBeUndefined();
   });
 });
 

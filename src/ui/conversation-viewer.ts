@@ -6,7 +6,7 @@
  * Adapted for pi-subagents-lite type shapes.
  */
 
-import { getHideThinkingBlock } from "../pi-settings.js";
+import { getHideThinkingBlock } from "../pi-settings.ts";
 
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
@@ -15,15 +15,17 @@ import {
   Markdown,
   matchesKey,
   type TUI,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { AgentRecord } from "../types.js";
-import { getSessionContextPercent } from "../agents/usage.js";
-import { extractText } from "../prompt/context.js";
-import type { Theme } from "./types.js";
-import { makeMarkdownTheme } from "./markdown-theme.js";
+import type { AgentRecord } from "../types.ts";
+import { getSessionContextPercent } from "../agents/usage.ts";
+import { extractText } from "../prompt/context.ts";
+import type { Theme } from "./types.ts";
+import { makeMarkdownTheme } from "./markdown-theme.ts";
 import {
   buildInvocationTags,
   buildStatsParts,
@@ -31,9 +33,9 @@ import {
   getDisplayName,
   resolveAgentModelLabel,
   statusIcon,
-} from "./format.js";
-import { summarizeToolArgs } from "../utils.js";
-import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./viewer-keys.js";
+} from "./format.ts";
+import { summarizeToolArgs } from "../utils.ts";
+import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./viewer-keys.ts";
 
 /** Fixed chrome lines: top border + 2 header rows + 2 separators + footer + bottom border. */
 const CHROME_LINES_BASE = 7;
@@ -142,7 +144,7 @@ export class ConversationViewer implements Component {
           // into the last slot at "done") — same refresh as the boundaries.
           this.refreshStreamingMessage();
         }
-      } catch (err) {
+      } catch {
         // Swallow — a throw here would crash the host menu; events can arrive after closure, before dispose.
       }
     });
@@ -285,11 +287,9 @@ export class ConversationViewer implements Component {
     const maxScroll = this.scrollMax();
 
     if (this.keys.scrollUp(data)) {
-      this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-      this.autoScroll = this.scrollOffset >= maxScroll;
+      this.scrollBy(-1);
     } else if (this.keys.scrollDown(data)) {
-      this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
-      this.autoScroll = this.scrollOffset >= maxScroll;
+      this.scrollBy(1);
     } else if (this.keys.pageUp(data)) {
       this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
       this.autoScroll = false;
@@ -303,6 +303,24 @@ export class ConversationViewer implements Component {
       this.scrollOffset = maxScroll;
       this.autoScroll = true;
     }
+  }
+
+  /**
+   * Mouse wheel scrolls the conversation. Without this handler pi's
+   * alternate-screen renderer treats the event as unhandled and scrolls the
+   * chat behind the overlay instead.
+   */
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (this.closed || event.type !== "wheel" || !event.wheelDelta) return undefined;
+    this.scrollBy(event.wheelDelta);
+    return { handled: true };
+  }
+
+  /** Scroll by `delta` lines (negative = up), clamped; re-engages auto-scroll when at the bottom. */
+  private scrollBy(delta: number): void {
+    const maxScroll = this.scrollMax();
+    this.scrollOffset = Math.min(maxScroll, Math.max(0, this.scrollOffset + delta));
+    this.autoScroll = this.scrollOffset >= maxScroll;
   }
 
   render(width: number): string[] {
@@ -692,7 +710,6 @@ export class ConversationViewer implements Component {
 
   private buildStreamingLines(width: number): string[] {
     const lines: string[] = [];
-    const th = this.theme;
 
     // Streaming thinking text — rendered before text, matching assistant message order
     if (this.streamingThinking.trim()) {

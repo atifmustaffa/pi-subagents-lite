@@ -2,7 +2,7 @@
  * agent-discovery.test.ts — Tests for agent file parsing, merging, and config.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { parseAgentFile, scanAgentFilesInDir, mergeAgents, parseExtensions } from "../../src/agents/agent-discovery.js";
 import type { AgentConfigFromMd } from "../../src/agents/agent-discovery.js";
 import type { AgentConfig } from "../../src/agents/types.js";
@@ -300,6 +300,17 @@ body
 `;
     const result = parseAgentFile(content, "user");
     expect(result.thinking).toBeUndefined();
+  });
+
+  it("accepts thinking: parent as the follow-the-parent value", () => {
+    const content = `---
+name: agent
+thinking: parent
+---
+body
+`;
+    const result = parseAgentFile(content, "user");
+    expect(result.thinking).toBe("parent");
   });
 
   it("parses CRLF", () => {

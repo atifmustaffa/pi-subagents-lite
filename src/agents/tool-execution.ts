@@ -1,4 +1,4 @@
-import { getStatusNote, formatStopReason } from "../status-note.js";
+import { getStatusNote, formatStopReason } from "../status-note.ts";
 /**
  * tool-execution.ts — Agent tool execution handlers.
  *
@@ -9,17 +9,20 @@ import { getStatusNote, formatStopReason } from "../status-note.js";
 
 import type { ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 
-import type { AgentRecord, ThinkingLevel } from "../types.js";
-import { SHORT_ID_LENGTH } from "../types.js";
-import type { AgentConfig } from "./types.js";
-import { resolveType, getAgentConfig, resolveTypeOrDiscover, type TypeResolution } from "./agent-types.js";
-import { getSessionContextPercent } from "./usage.js";
-import { computeSpawnTarget, surfaceSpawnTargetWarnings } from "../spawn/spawn-target.js";
+import type { AgentManager } from "./agent-manager.ts";
+import type { SubagentAgentManager } from "./subagent-context.ts";
+import type { AgentRecord, ThinkingLevel } from "../types.ts";
+import { SHORT_ID_LENGTH } from "../types.ts";
+import type { AgentConfig } from "./types.ts";
+import { getAgentConfig, resolveTypeOrDiscover } from "./agent-types.ts";
+import { getSessionContextPercent } from "./usage.ts";
+import { computeSpawnTarget, surfaceSpawnTargetWarnings } from "../spawn/spawn-target.ts";
 
-import { parseModelKey, resolveRequestedModel, parseThinkingLevel } from "../utils.js";
-import { resolveThinkingLevel } from "../models/thinking-resolution.js";
-import { getPiModelThinkingLevel } from "../pi-settings.js";
-import { getPiInstance, getStore, getCoordinator, getManager } from "../shell.js";
+import { parseModelKey, resolveRequestedModel, parseThinkingChoice } from "../utils.ts";
+import { resolveThinkingLevel } from "../models/thinking-resolution.ts";
+import { getPiModelThinkingLevel } from "../pi-settings.ts";
+import { getPiInstance, getStore, getCoordinator, getManager } from "../shell.ts";
+import { formatAgentStatusList } from "./agent-status.ts";
 
 // --- Tool result helpers ---
 
@@ -31,11 +34,13 @@ function successResult(text: string, details?: Record<string, unknown>) {
  * The thinking a spawn of this call would run with, predicted at call time:
  * frontmatter > pi per-model > defaultThinking. Undefined when nothing is
  * configured — the session is the source of truth once it exists. The
- * per-model term obeys the same project-trust gate as the spawn's own
- * settings read: computeSpawnTarget's validation plus trust decision, run
- * silently (execution owns the user-facing warnings). Without the gate, an
- * untrusted cross-repo target's settings file could set the spawn's thinking
- * through the injected value, which wins as the explicit param.
+ * per-model term carries the spawn target's trust decision into the settings
+ * read: computeSpawnTarget's validation plus trust decision, run silently
+ * (execution owns the user-facing warnings). An untrusted target's own project
+ * layer is then ignored, so its settings file cannot set the spawn's thinking
+ * through the injected value (which wins as the explicit param), while the
+ * user's global layer still applies — the scope the child's session is created
+ * with.
  */
 async function predictSpawnThinking(
   ctx: ExtensionContext,
@@ -49,13 +54,16 @@ async function predictSpawnThinking(
   const modelKey = effectiveModel || (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "");
   const parsed = parseModelKey(modelKey);
   const perModel =
-    target.ok && target.projectTrusted && parsed
-      ? getPiModelThinkingLevel(target.resolvedPath ?? ctx.cwd, parsed.provider, parsed.modelId)
+    target.ok && parsed
+      ? getPiModelThinkingLevel(target.resolvedPath ?? ctx.cwd, parsed.provider, parsed.modelId, {
+          projectTrusted: target.projectTrusted,
+        })
       : undefined;
   return resolveThinkingLevel({
     frontmatter: agentConfig?.thinkingLevel,
     perModel,
     defaultThinking: getStore().agent.defaultThinking,
+    parentLevel: ctx.thinkingLevel,
   });
 }
 
@@ -198,13 +206,18 @@ export async function executeAgentTool(
   // spawn runner owns them (its trust-gated settings read keeps per-model
   // above defaultThinking; folding them into this explicit param would shadow
   // per-model). When the listener ran, it already injected the full chain.
-  const thinkingLevel =
-    parseThinkingLevel(params.thinking as string | undefined) ?? getAgentConfig(resolvedType)?.thinkingLevel;
+  // A `parent` value resolves here because the explicit param and the stored
+  // invocation must never carry it; the parent's level needs no trust gate.
+  const thinkingLevel = resolveThinkingLevel({
+    explicit: parseThinkingChoice(params.thinking as string | undefined),
+    frontmatter: getAgentConfig(resolvedType)?.thinkingLevel,
+    parentLevel: ctx.thinkingLevel,
+  });
 
   const coordinator = getCoordinator()!;
-  // Background spawns (explicit or forceBackground) never bind to the parent
-  // run's interrupt signal — only foreground spawns can be interrupted.
-  const isBackground = runInBackground || getStore().agent.forceBackground;
+  // An active MessageAgent in the child loadout also promotes this spawn once
+  // the child session has bound its final tool set.
+  const startsInBackground = runInBackground || getStore().agent.forceBackground;
 
   const result = await coordinator.spawn(getPiInstance(), ctx, {
     type: resolvedType,
@@ -218,12 +231,13 @@ export async function executeAgentTool(
     worktreePath: validatedWorktreePath,
     worktreeLabel,
     projectTrusted,
-    invocation: { modelName, thinkingLevel, maxTurns },
-    runInBackground: isBackground,
-    signal: isBackground ? undefined : signal,
+    invocation: { modelName, thinkingLevel, maxTurns, runInBackground: startsInBackground },
+    runInBackground: startsInBackground,
+    signal: startsInBackground ? undefined : signal,
   });
 
   const { agentId, record } = result;
+  const isBackground = result.isBackground;
 
   // Store toolCallId in record for call renderer to find agent
   if (_toolCallId) {
@@ -231,7 +245,8 @@ export async function executeAgentTool(
   }
 
   if (isBackground) {
-    const suffix = `Success! You delegated to an agent. A notification will arrive when done - USER: do not poll, don't check status and don't duplicate the delegated work!\n\nAgent ID: ${agentId}`;
+    const reason = !startsInBackground ? " MessageAgent is active, so it was started in the background." : "";
+    const suffix = `Success! You delegated to an agent.${reason} A notification will arrive when done - USER: do not poll, don't check status and don't duplicate the delegated work!\n\nAgent ID: ${agentId}`;
     const label = record.lifecycle.status === "queued" ? "Agent queued" : "Agent running";
     const details = buildAgentDetails(record);
     details.agentId = agentId;
@@ -297,7 +312,12 @@ export async function executeContinueAgentTool(
   });
 }
 
-// --- Running agents list helper (used by executeStopAgentTool) ---
+// --- Agent id resolution and failure lists, shared by the agent tools ---
+
+/** The id form tool output prints and the model quotes back (ADR-0010). */
+function shortId(record: AgentRecord): string {
+  return record.id.slice(0, SHORT_ID_LENGTH);
+}
 
 /**
  * Build a compact list of running (or queued) agents.
@@ -310,7 +330,34 @@ function formatRunningAgents(): string {
 
   if (agents.length === 0) return "none";
 
-  return agents.map((a) => `${a.id.slice(0, SHORT_ID_LENGTH)} (${a.display.type})`).join(", ");
+  return agents.map((a) => `${shortId(a)} (${a.display.type})`).join(", ");
+}
+
+/**
+ * Resolve tool input to exactly one retained record: exact id, else an unambiguous
+ * prefix (ADR-0010). A blank id is a missing id, so resolution never sees a prefix
+ * that matches every record; ambiguity names every candidate by full id, the only
+ * place full ids are printed. `notFoundDetail` names the agents the calling tool can
+ * act on, because stop and message have opposite preconditions.
+ */
+function resolveAgent(
+  agentId: unknown,
+  notFoundDetail: () => string,
+  managerOverride?: Pick<AgentManager, "matchAgents">,
+): AgentRecord {
+  const id = (agentId as string | undefined)?.trim() ?? "";
+  if (!id) throw new Error("agent_id is required");
+
+  const manager = managerOverride ?? getManager();
+  if (!manager) throw new Error("Agent manager is unavailable");
+  const matches = manager.matchAgents(id);
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error(
+      `Ambiguous agent id ${id}. Matching agents: ${matches.map((m) => m.id).join(", ")}. Use a longer id.`,
+    );
+  }
+  throw new Error(`Agent ${id} not found. ${notFoundDetail()}`);
 }
 
 // --- StopAgent execute handler ---
@@ -322,29 +369,71 @@ export async function executeStopAgentTool(
   _onUpdate: ((update: any) => void) | undefined,
   _ctx: ExtensionContext,
 ): Promise<any> {
-  const agentId = params.agent_id as string | undefined;
-
-  if (!agentId) {
-    throw new Error("agent_id is required");
-  }
-
-  const record = getManager()!.getRecord(agentId);
-
-  if (!record) {
-    throw new Error(`Agent ${agentId} not found. Running agents: ${formatRunningAgents()}`);
-  }
+  const manager = getManager()!;
+  const record = resolveAgent(params.agent_id, () => `Running agents: ${formatRunningAgents()}`);
 
   if (record.lifecycle.status !== "running" && record.lifecycle.status !== "queued") {
     return successResult(
-      `Agent ${agentId} is already ${record.lifecycle.status}. Running agents: ${formatRunningAgents()}`,
+      `Agent ${shortId(record)} is already ${record.lifecycle.status}. Running agents: ${formatRunningAgents()}`,
     );
   }
 
-  if (getManager()!.abort(agentId, "agent")) {
-    return successResult(`Stopped agent ${agentId.slice(0, SHORT_ID_LENGTH)}`);
+  if (manager.abort(record.id, "agent")) {
+    return successResult(`Stopped agent ${shortId(record)}`);
   }
 
-  throw new Error(`Failed to stop agent ${agentId}`);
+  throw new Error(`Failed to stop agent ${shortId(record)}`);
+}
+
+// --- MessageAgent execute handler ---
+
+/** Bounded list of every retained agent, settled ones included: a message needs a
+ * live session, not a run, so the addressable set is wider than StopAgent's.
+ */
+function formatKnownAgents(manager: Pick<AgentManager, "listAgents">, limit: number): string {
+  const agents = manager.listAgents();
+  if (agents.length === 0) return "none";
+  return formatAgentStatusList(agents, limit);
+}
+
+/**
+ * Give an existing agent more input through the manager's steer/continue seam: a
+ * running target takes the message at its next turn boundary, a settled target with
+ * a live session restarts on it. No agent is created and no queue is owned here. The
+ * report names what was queued, never a promise that it was read before the run ended.
+ */
+export async function executeMessageAgentTool(
+  _toolCallId: string,
+  params: Record<string, unknown>,
+  _signal: AbortSignal | undefined,
+  _onUpdate: ((update: any) => void) | undefined,
+  _ctx: ExtensionContext,
+  managerOverride?: SubagentAgentManager,
+  agentStatusLimit?: number,
+): Promise<any> {
+  const text = (params.message as string | undefined)?.trim() ?? "";
+  if (!text) throw new Error("message is required");
+
+  const manager = managerOverride ?? getManager();
+  if (!manager) throw new Error("Agent manager is unavailable");
+  const limit = agentStatusLimit ?? getStore().agent.agentStatusLimit;
+  const record = resolveAgent(params.agent_id, () => `Known agents: ${formatKnownAgents(manager, limit)}`, manager);
+  const wasRunning = record.lifecycle.status === "running";
+
+  if (!wasRunning && !record.execution.session) {
+    return successResult(
+      `Agent ${shortId(record)} is ${record.lifecycle.status} with no live session. Message not sent.`,
+    );
+  }
+
+  if (!(await manager.steer(record.id, text))) {
+    throw new Error(
+      `Failed to send message to agent ${shortId(record)}. ` +
+        `It may still be settling or its concurrency slot is full. Try again.`,
+    );
+  }
+
+  return successResult(wasRunning ? "Sent (steered)" : "Sent (continued)");
 }
 
 // --- Tool_call listener — inject model into Agent tool calls ---

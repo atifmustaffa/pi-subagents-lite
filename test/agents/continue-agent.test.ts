@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { shellMock } from "../fixtures.js";
-import { asExtensionContext } from "../pi-boundaries.js";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { shellMock } from "../fixtures.ts";
+import { asExtensionContext } from "../pi-boundaries.ts";
 
 const { mockGetRecord, mockListAgents, mockSteer } = vi.hoisted(() => ({
   mockGetRecord: vi.fn(),
@@ -8,7 +8,7 @@ const { mockGetRecord, mockListAgents, mockSteer } = vi.hoisted(() => ({
   mockSteer: vi.fn(),
 }));
 
-vi.mock("../../src/shell.js", () =>
+vi.mock("../../src/shell.ts", () =>
   shellMock({
     manager: {
       getRecord: mockGetRecord,
@@ -18,7 +18,7 @@ vi.mock("../../src/shell.js", () =>
   }),
 );
 
-import { executeContinueAgentTool } from "../../src/agents/tool-execution.js";
+import { executeContinueAgentTool } from "../../src/agents/tool-execution.ts";
 
 function settledRecord(overrides: Record<string, unknown> = {}) {
   return {

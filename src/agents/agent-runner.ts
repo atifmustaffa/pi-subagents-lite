@@ -18,27 +18,24 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import {
-  getAgentConfig,
-  getConfig,
-  getToolNamesForType,
-  resolveSessionAllowedTools,
-  resolveVisibleTools,
-} from "./agent-types.js";
-import { extractText } from "../prompt/context.js";
-import { readDefaultTools } from "../pi-settings.js";
-import { resolveThinkingLevel } from "../models/thinking-resolution.js";
-import type { AgentUsage } from "./usage.js";
-import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.js";
-import { DEFAULT_AGENTS } from "./default-agents.js";
-import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.js";
-import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.js";
-import { type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.js";
-import type { SubagentType, SystemPromptMode } from "./types.js";
-import { getStore, enterSubagentSpawn, exitSubagentSpawn } from "../shell.js";
-import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../config/config-io.js";
-import { patchRetryClassifier } from "./stream-retry.js";
-import { applyOutputLimit, resolveOutputLimit } from "./max-tokens-field.js";
+import { getAgentConfig, getConfig, resolveSessionToolOptions, resolveVisibleTools } from "./agent-types.ts";
+import { extractText } from "../prompt/context.ts";
+import { resolveThinkingLevel } from "../models/thinking-resolution.ts";
+import type { AgentUsage } from "./usage.ts";
+import { findModelInRegistry, GIT_EXEC_TIMEOUT_MS } from "../utils.ts";
+import { DEFAULT_AGENTS } from "./default-agents.ts";
+import { buildAgentPrompt, type PromptExtras } from "../prompt/prompts.ts";
+import { preloadSkills, loadSkillMeta } from "../prompt/skill-loader.ts";
+import { type EnvInfo, type RunCallbacks, type RunTunables, SHORT_ID_LENGTH } from "../types.ts";
+import type { SubagentType, SystemPromptMode } from "./types.ts";
+import { getManager, getStore } from "../shell.ts";
+import { withSubagentParent } from "./subagent-context.ts";
+import { BUILTIN_EXTENSION_FACTORIES } from "./builtin-extensions.ts";
+import { disposeChildSession } from "./session-teardown.ts";
+import { announceChildSessionBound, announceChildSessionCreated } from "./child-announcements.ts";
+import { DEFAULT_GRACE_TURNS, CUSTOM_PROMPT_PATH } from "../config/config-io.ts";
+import { patchRetryClassifier } from "./stream-retry.ts";
+import { applyOutputLimit, resolveOutputLimit } from "./max-tokens-field.ts";
 
 // Cache: extension path → unscoped package name (lowercased), or undefined if not found
 const packageNameCache = new Map<string, string | undefined>();
@@ -111,6 +108,7 @@ interface RunOptions extends RunTunables, RunCallbacks {
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
   agentId?: string;
+  onBackgroundPromotion?: () => void;
   cwd?: string;
   /**
    * Trust state for the target project. False = ignore the target's project
@@ -246,8 +244,16 @@ export function subscribeToSessionEvents(
   });
 }
 
+/** Path prefix pi gives its built-in extensions (not exported by pi's SDK). */
+const BUILTIN_PATH_PREFIX = "builtin:";
+
 /** Extension name from its install path (git/npm/local/direct); independent of dist/lib/src internals. */
 function extractExtensionName(extPath: string): string {
+  // Pi built-ins are synthetic paths (builtin:<name>): they name themselves.
+  if (extPath.startsWith(BUILTIN_PATH_PREFIX)) {
+    return extPath.slice(BUILTIN_PATH_PREFIX.length);
+  }
+
   const parts = extPath.split(path.sep);
 
   // 1. Git package: .../git/github.com/<user>/<pkg>/...
@@ -344,7 +350,7 @@ function resolveSystemPromptSources(
     try {
       extras.parentSystemPrompt = ctx.getSystemPrompt();
     } catch (err) {
-      notify(`Failed to get parent system prompt: ${err}. Falling back to replace mode.`);
+      notify(`Failed to get parent system prompt: ${String(err)}. Falling back to replace mode.`);
     }
   }
 
@@ -403,9 +409,11 @@ function buildPrompt(
 function buildExtToolMap(extensions: Array<{ path: string; tools: Map<string, unknown> }>) {
   const map = new Map<string, string[]>();
   for (const ext of extensions) {
-    const name = extractExtensionName(ext.path);
+    const name = extensionPackageName(ext.path) ?? extractExtensionName(ext.path);
     const tools = [...ext.tools.keys()];
-    if (tools.length > 0) map.set(name, tools);
+    if (tools.length > 0) {
+      map.set(name, [...new Set([...(map.get(name) ?? []), ...tools])]);
+    }
   }
   return map;
 }
@@ -482,6 +490,10 @@ function createResourceLoader(
     cwd,
     agentDir,
     settingsManager,
+    // Pi's built-ins (codemode, tool-search, mcp) for child sessions. Passed
+    // unconditionally: the loader applies settings selection, replaceability,
+    // and its own gating (noExtensions skips them entirely).
+    extensionFactories: BUILTIN_EXTENSION_FACTORIES,
     noExtensions: extensions === false,
     noSkills,
     noPromptTemplates: true,
@@ -502,17 +514,28 @@ function createResourceLoader(
   };
 }
 
-async function initSession(
-  ctx: ExtensionContext,
-  options: RunOptions,
-  agentConfig: ReturnType<typeof getAgentConfig>,
-  type: SubagentType,
-  cwd: string,
-  loader: DefaultResourceLoader,
-  extToolMap: Map<string, string[]>,
-  settingsManager: SettingsManager,
-  defaultTools: string[] | undefined,
-): Promise<AgentSession> {
+function hasOpenAIResponsesOutputLimit(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    Object.prototype.hasOwnProperty.call(payload, "max_output_tokens")
+  );
+}
+
+/** Everything child-session setup needs for one spawn; assembled once by createChildSession. */
+interface SessionSetup {
+  ctx: ExtensionContext;
+  options: RunOptions;
+  agentConfig: ReturnType<typeof getAgentConfig>;
+  type: SubagentType;
+  cwd: string;
+  loader: DefaultResourceLoader;
+  extToolMap: Map<string, string[]>;
+  settingsManager: SettingsManager;
+}
+
+async function initSession(setup: SessionSetup): Promise<AgentSession> {
+  const { ctx, options, agentConfig, cwd, loader, extToolMap, settingsManager } = setup;
   const model = options.model ?? findModelInRegistry(agentConfig?.model, ctx.modelRegistry, ctx.model);
   // Per-model comes from the same trust-gated instance the session is created
   // with, so the project-trust gate applies to the read identically. When
@@ -524,6 +547,7 @@ async function initSession(
     frontmatter: agentConfig?.thinkingLevel,
     perModel: perModelLevel,
     defaultThinking: getStore().agent.defaultThinking,
+    parentLevel: ctx.thinkingLevel,
   });
   const agentDir = getAgentDir();
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
@@ -532,10 +556,13 @@ async function initSession(
     sessionManager: SessionManager.inMemory(cwd),
     settingsManager,
     model,
-    tools: resolveSessionAllowedTools({
-      registeredTools: getToolNamesForType(type, defaultTools),
+    // Explicit frontmatter gates the registry; a silent config delegates to pi
+    // (defaultTools activation, complete registry) or starts tool-less.
+    ...resolveSessionToolOptions({
+      registeredTools: agentConfig?.registeredTools,
       tools: agentConfig?.tools,
       extToolMap,
+      loadToolsImplicitly: getStore().agent.loadToolsImplicitly,
     }),
     resourceLoader: loader,
   };
@@ -565,7 +592,8 @@ async function initSession(
       // Post-build overwrite by design (as in the prior fix): pi's context
       // clamp and thinking-budget adjust already ran on the model default.
       const limit = resolveOutputLimit(m, maxTokens);
-      if (!limit) return applied;
+      // Pi omits this for ChatGPT sign-in, so preserve that auth-specific decision.
+      if (!limit || (m.api === "openai-responses" && !hasOpenAIResponsesOutputLimit(applied))) return applied;
       return applyOutputLimit(applied, limit);
     };
   }
@@ -573,50 +601,40 @@ async function initSession(
   return session;
 }
 
-async function createAndConfigureSession(
-  ctx: ExtensionContext,
-  options: RunOptions,
-  agentConfig: ReturnType<typeof getAgentConfig>,
-  type: SubagentType,
-  cwd: string,
-  loader: DefaultResourceLoader,
-  extToolMap: Map<string, string[]>,
-  settingsManager: SettingsManager,
-  defaultTools: string[] | undefined,
-  notify: (msg: string) => void,
-): Promise<AgentSession> {
-  const session = await initSession(
-    ctx,
-    options,
-    agentConfig,
-    type,
-    cwd,
-    loader,
-    extToolMap,
-    settingsManager,
-    defaultTools,
-  );
+async function createAndConfigureSession(setup: SessionSetup, notify: (msg: string) => void): Promise<AgentSession> {
+  const session = await initSession(setup);
+  const { agentConfig, ctx, options, type, extToolMap } = setup;
   const baseName = agentConfig?.name ?? type;
   session.setSessionName(options.agentId ? `${baseName}#${options.agentId.slice(0, SHORT_ID_LENGTH)}` : baseName);
-  await session.bindExtensions({
-    onError: (err) =>
-      options.onToolActivity?.({
-        type: "end",
-        toolName: `extension-error:${err.extensionPath}`,
-      }),
-  });
+  try {
+    announceChildSessionCreated(session, options.pi.events, ctx.sessionManager.getSessionId());
+    await session.bindExtensions({
+      onError: (err) =>
+        options.onToolActivity?.({
+          type: "end",
+          toolName: `extension-error:${err.extensionPath}`,
+        }),
+    });
 
-  const filteredTools = resolveVisibleTools({
-    activeTools: session.getActiveToolNames(),
-    tools: agentConfig?.tools,
-    excludeTools: agentConfig?.excludeTools,
-    extToolMap,
-    notify,
-  });
-  if (filteredTools) session.setActiveToolsByName(filteredTools);
+    const filteredTools = resolveVisibleTools({
+      activeTools: session.getActiveToolNames(),
+      tools: agentConfig?.tools,
+      excludeTools: agentConfig?.excludeTools,
+      extToolMap,
+      notify,
+    });
+    if (filteredTools) session.setActiveToolsByName(filteredTools);
+  } catch (err) {
+    // Setup failed with a live session: terminate it through the shared
+    // teardown so built-in extension resources never outlive the failure.
+    await disposeChildSession(session);
+    throw err;
+  }
+  announceChildSessionBound(session);
   options.onSessionCreated?.(session);
   return session;
 }
+
 function wireTurnTracking(session: AgentSession, options: Pick<RunOptions, "maxTurns" | "graceTurns" | "onTurnEnd">) {
   let turnCount = 0;
   const maxTurns = normalizeMaxTurns(options.maxTurns);
@@ -720,14 +738,7 @@ export async function runAgent(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
-  // Bracket the whole subagent lifecycle so the extension factory can detect
-  // it's being re-loaded inside a subagent and avoid clobbering the parent shell.
-  enterSubagentSpawn();
-  try {
-    return await runAgentImpl(ctx, type, prompt, options);
-  } finally {
-    exitSubagentSpawn();
-  }
+  return runAgentImpl(ctx, type, prompt, options);
 }
 
 async function runAgentImpl(
@@ -736,75 +747,109 @@ async function runAgentImpl(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
-  const store = getStore();
-  const effectiveCwd = options.cwd ?? ctx.cwd;
-
-  // One SettingsManager for the whole spawn: its trust state gates both the
-  // resource loader (project extensions/skills/prompts/themes/system prompt
-  // files) and the session context (ctx.isProjectTrusted). Created before
-  // getConfig so its defaultTools setting can feed the resolved config and
-  // the session tool gate from the same instance.
-  const settingsManager = SettingsManager.create(effectiveCwd, getAgentDir(), {
-    projectTrusted: options.projectTrusted !== false,
-  });
-
-  // Read once per spawn: getConfig and getToolNamesForType share this value,
-  // so their fallbacks cannot diverge. undefined = setting unconfigured.
-  const defaultTools = readDefaultTools(settingsManager);
-
-  const config = getConfig(type, store.agent.loadSkillsImplicitly, store.agent.loadExtensionsImplicitly, defaultTools);
-  const agentConfig = getAgentConfig(type);
-
-  // Buffer warnings during setup to avoid inserting custom_message entries
-  // between tool_use and tool_result in the session tree (causes Anthropic 400).
-  // Flushed after runTurnLoop completes.
-  const warnings: string[] = [];
-  const bufferNotify = (msg: string) => {
-    warnings.push(msg);
-  };
-  if (agentConfig?.excludeTools && Array.isArray(agentConfig.tools)) {
-    bufferNotify(`agent "${type}": both tools and exclude_tools set — tools (whitelist) wins`);
-  }
-  if (agentConfig?.excludeExtensions && Array.isArray(agentConfig.extensions)) {
-    bufferNotify(`agent "${type}": both extensions and exclude_extensions set — extensions (whitelist) wins`);
-  }
-
-  const env = await detectEnv(options.pi, effectiveCwd);
-
-  const { mode, extras: promptExtras } = resolveSystemPromptSources(ctx, effectiveCwd, bufferNotify, agentConfig);
-
-  const systemPrompt = buildPrompt(type, agentConfig, config, effectiveCwd, env, mode, promptExtras);
-  const { loader, reloadAndMap } = createResourceLoader(
-    config,
-    agentConfig,
-    effectiveCwd,
-    systemPrompt,
-    settingsManager,
-    bufferNotify,
-  );
-  const { extToolMap } = await reloadAndMap();
-  const session = await createAndConfigureSession(
-    ctx,
-    options,
-    agentConfig,
-    type,
-    effectiveCwd,
-    loader,
-    extToolMap,
-    settingsManager,
-    defaultTools,
-    bufferNotify,
-  );
+  const { session, warnings, agentConfig } = await createChildSession(ctx, type, options);
   const result = await runSessionPrompt(session, prompt, {
     ...options,
     maxTurns: options.maxTurns ?? agentConfig?.maxTurns,
   });
 
   // Flush buffered warnings now that tool_result is in the session tree.
+  flushWarnings(ctx, warnings);
+
+  return result;
+}
+
+/** Surface buffered setup warnings without splitting tool_use from tool_result. */
+function flushWarnings(ctx: ExtensionContext, warnings: string[]): void {
   for (const msg of warnings) {
     if (ctx.ui?.notify) ctx.ui.notify(`[pi-subagents-lite] ${msg}`, "warning");
     else console.warn(`[pi-subagents-lite] ${msg}`);
   }
+}
 
-  return result;
+/**
+ * The full child-session setup, prompt-free: settings, tool resolution, the
+ * resource loader with pi's built-in factories, session creation, extension
+ * binding, and tool visibility. Binds the parent capability only while this
+ * child runtime loads extensions. The contract suite drives this directly
+ * against the real SDK; runAgentImpl adds only the prompt and warning flush.
+ * Returns the buffered warnings (flush after the
+ * run's tool_result lands) and the agent config (for maxTurns).
+ */
+export async function createChildSession(
+  ctx: ExtensionContext,
+  type: SubagentType,
+  options: RunOptions,
+): Promise<{ session: AgentSession; warnings: string[]; agentConfig: ReturnType<typeof getAgentConfig> }> {
+  const store = getStore();
+  return withSubagentParent(
+    {
+      pi: options.pi,
+      ctx,
+      manager: getManager() ?? undefined,
+      agentId: options.agentId,
+      agentStatusLimit: store.agent.agentStatusLimit,
+      onBackgroundPromotion: options.onBackgroundPromotion,
+    },
+    async () => {
+      const effectiveCwd = options.cwd ?? ctx.cwd;
+
+      // One SettingsManager for the whole spawn: its trust state gates both the
+      // resource loader (project extensions/skills/prompts/themes/system prompt
+      // files) and the session context (ctx.isProjectTrusted). pi reads
+      // defaultTools and the extension selection from this same instance.
+      const settingsManager = SettingsManager.create(effectiveCwd, getAgentDir(), {
+        projectTrusted: options.projectTrusted !== false,
+      });
+
+      const config = getConfig(type, store.agent.loadSkillsImplicitly, store.agent.loadExtensionsImplicitly);
+      const agentConfig = getAgentConfig(type);
+
+      // Buffer warnings during setup to avoid inserting custom_message entries
+      // between tool_use and tool_result in the session tree (causes Anthropic 400).
+      // Flushed after runTurnLoop completes.
+      const warnings: string[] = [];
+      const bufferNotify = (msg: string) => {
+        warnings.push(msg);
+      };
+      if (agentConfig?.excludeTools && Array.isArray(agentConfig.tools)) {
+        bufferNotify(`agent "${type}": both tools and exclude_tools set — tools (whitelist) wins`);
+      }
+      if (agentConfig?.excludeExtensions && Array.isArray(agentConfig.extensions)) {
+        bufferNotify(`agent "${type}": both extensions and exclude_extensions set — extensions (whitelist) wins`);
+      }
+
+      const env = await detectEnv(options.pi, effectiveCwd);
+
+      // The parent interrupt can land mid-setup; every await below re-checks so a
+      // stopped spawn either skips session creation or tears the session down.
+      const throwIfAborted = (stage: string): void => {
+        if (options.signal?.aborted) throw new Error(`agent "${type}": aborted during setup (${stage})`);
+      };
+      throwIfAborted("before resource load");
+
+      const { mode, extras: promptExtras } = resolveSystemPromptSources(ctx, effectiveCwd, bufferNotify, agentConfig);
+
+      const systemPrompt = buildPrompt(type, agentConfig, config, effectiveCwd, env, mode, promptExtras);
+      const { loader, reloadAndMap } = createResourceLoader(
+        config,
+        agentConfig,
+        effectiveCwd,
+        systemPrompt,
+        settingsManager,
+        bufferNotify,
+      );
+      const { extToolMap } = await reloadAndMap();
+      throwIfAborted("before session creation");
+      const session = await createAndConfigureSession(
+        { ctx, options, agentConfig, type, cwd: effectiveCwd, loader, extToolMap, settingsManager },
+        bufferNotify,
+      );
+      if (options.signal?.aborted) {
+        await disposeChildSession(session);
+        throwIfAborted("after session creation");
+      }
+      return { session, warnings, agentConfig };
+    },
+  );
 }

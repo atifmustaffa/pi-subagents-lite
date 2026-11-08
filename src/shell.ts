@@ -7,10 +7,10 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentManager } from "./agents/agent-manager.js";
-import type { AgentWidget } from "./ui/agent-widget.js";
-import type { SpawnCoordinator } from "./spawn/spawn-coordinator.js";
-import { ConfigStore } from "./config/config-store.js";
+import type { AgentManager } from "./agents/agent-manager.ts";
+import type { AgentWidget } from "./ui/agent-widget.ts";
+import type { SpawnCoordinator } from "./spawn/spawn-coordinator.ts";
+import { ConfigStore } from "./config/config-store.ts";
 
 // --- Shell type ---
 
@@ -86,26 +86,4 @@ export function setWidget(w: AgentWidget | null): void {
 
 export function setCoordinator(c: SpawnCoordinator | null): void {
   shell.coordinator = c;
-}
-
-// --- Subagent spawn context ---
-
-/**
- * Nesting depth of in-flight subagent spawns. Subagent re-loads of this
- * extension would clobber parent-owned shell singletons; the factory checks
- * this flag and stays inert while a subagent is spawning.
- */
-let subagentSpawnDepth = 0;
-
-export function enterSubagentSpawn(): void {
-  subagentSpawnDepth++;
-}
-
-export function exitSubagentSpawn(): void {
-  if (subagentSpawnDepth > 0) subagentSpawnDepth--;
-}
-
-/** True while a subagent is being spawned (factory/session_start run in subagent context). */
-export function isInsideSubagentSpawn(): boolean {
-  return subagentSpawnDepth > 0;
 }

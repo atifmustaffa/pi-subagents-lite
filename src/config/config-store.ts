@@ -16,13 +16,13 @@
  * at session_start. `dispose()` drops deps at session_shutdown.
  */
 
-import type { SubagentsConfig, SessionModelOverrides } from "../models/model-precedence.js";
-import { resolveModel } from "../models/model-precedence.js";
-import type { AgentWidget } from "../ui/agent-widget.js";
-import type { AgentManager } from "../agents/agent-manager.js";
-import { CONFIG_AGENT_NON_MODEL_KEYS, type ModelThinkingPlacement } from "./types.js";
-import type { SystemPromptMode } from "../agents/types.js";
-import type { ThinkingLevel } from "../types.js";
+import type { SubagentsConfig, SessionModelOverrides } from "../models/model-precedence.ts";
+import { resolveModel } from "../models/model-precedence.ts";
+import type { AgentWidget } from "../ui/agent-widget.ts";
+import type { AgentManager } from "../agents/agent-manager.ts";
+import { CONFIG_AGENT_NON_MODEL_KEYS, type ModelThinkingPlacement } from "./types.ts";
+import type { SystemPromptMode } from "../agents/types.ts";
+import type { ThinkingChoice } from "../types.ts";
 import {
   VALID_SYSTEM_PROMPT_MODES,
   DEFAULT_WATCHDOG_TIMEOUT_MINUTES,
@@ -38,9 +38,9 @@ import {
   type ProjectLayerStatus,
   type RawConfig,
   type RawConcurrency,
-} from "./config-io.js";
+} from "./config-io.ts";
 
-export type { ConfigIO, ConfigTarget, ProjectLayerStatus, RawConfig, RawConcurrency } from "./config-io.js";
+export type { ConfigIO, ConfigTarget, ProjectLayerStatus, RawConfig, RawConcurrency } from "./config-io.ts";
 
 export const fileConfigIO: ConfigIO = createConfigIO();
 
@@ -93,13 +93,15 @@ export interface ResolvedAgentSettings {
   /** Whether to include AGENTS.md context files in the subagent system prompt. */
   readonly includeContextFiles: boolean;
   /** Default thinking level for spawned agents. Undefined = inherit from agent config. */
-  readonly defaultThinking: ThinkingLevel | undefined;
+  readonly defaultThinking: ThinkingChoice | undefined;
   /** Default max turns for spawned agents. Undefined = unlimited. */
   readonly defaultMaxTurns: number | undefined;
   /** Global default for skills loading: true (load all) or false (none). */
   readonly loadSkillsImplicitly: boolean;
   /** Global default for extensions loading: true (load all) or false (none). */
   readonly loadExtensionsImplicitly: boolean;
+  /** Global default for tools: true delegates tool setup to pi, false starts tool-less when frontmatter omits tool fields. */
+  readonly loadToolsImplicitly: boolean;
   /** Whether to skip built-in default agents at registration. */
   readonly disableDefaultAgents: boolean;
   /** Whether to use strict-mode schema for the Agent tool. Costs more tokens. */
@@ -213,10 +215,11 @@ export class ConfigStore {
         ? (a.systemPromptMode as SystemPromptMode)
         : "replace",
       includeContextFiles: a.includeContextFiles ?? true,
-      defaultThinking: a.defaultThinking as ThinkingLevel | undefined,
+      defaultThinking: a.defaultThinking as ThinkingChoice | undefined,
       defaultMaxTurns: a.defaultMaxTurns,
       loadSkillsImplicitly: a.loadSkillsImplicitly !== false,
       loadExtensionsImplicitly: a.loadExtensionsImplicitly !== false,
+      loadToolsImplicitly: a.loadToolsImplicitly !== false,
       disableDefaultAgents: a.disableDefaultAgents === true,
       agentToolStrictMode: a.agentToolStrictMode === true,
       exposeDescriptions: a.exposeDescriptions === true,
@@ -248,8 +251,8 @@ export class ConfigStore {
     const session = this.sessionConcurrencyLayer;
     return {
       default: session.default ?? base.default,
-      providers: { ...(base.providers ?? {}), ...(session.providers ?? {}) },
-      models: { ...(base.models ?? {}), ...(session.models ?? {}) },
+      providers: { ...base.providers, ...session.providers },
+      models: { ...base.models, ...session.models },
     };
   }
 
@@ -287,11 +290,11 @@ export class ConfigStore {
   }
 
   get projectConcurrency(): RawConcurrency {
-    return { ...(this.projectRaw?.concurrency ?? {}) };
+    return { ...this.projectRaw?.concurrency };
   }
 
   get globalConcurrency(): RawConcurrency {
-    return { ...(this.globalRaw.concurrency ?? {}) };
+    return { ...this.globalRaw.concurrency };
   }
 
   get sessionConcurrency(): RawConcurrency {
@@ -381,7 +384,7 @@ export class ConfigStore {
       setOutputTranscript: (enabled: boolean) => this.setAgentLayerEntry("outputTranscript", enabled, "global"),
       setSystemPromptMode: (mode: SystemPromptMode) => this.setAgentLayerEntry("systemPromptMode", mode, "global"),
       setIncludeContextFiles: (enabled: boolean) => this.setAgentLayerEntry("includeContextFiles", enabled, "global"),
-      setDefaultThinking: (level: ThinkingLevel | undefined, target: "global" | "project" = "global"): void => {
+      setDefaultThinking: (level: ThinkingChoice | undefined, target: "global" | "project" = "global"): void => {
         this.setAgentLayerEntry("defaultThinking", level, target);
       },
       setDefaultMaxTurns: (n: number | undefined, target: "global" | "project" = "global"): void => {
@@ -402,6 +405,7 @@ export class ConfigStore {
       setLoadSkillsImplicitly: (value: boolean) => this.setAgentLayerEntry("loadSkillsImplicitly", value, "global"),
       setLoadExtensionsImplicitly: (value: boolean) =>
         this.setAgentLayerEntry("loadExtensionsImplicitly", value, "global"),
+      setLoadToolsImplicitly: (value: boolean) => this.setAgentLayerEntry("loadToolsImplicitly", value, "global"),
       setDisableDefaultAgents: (value: boolean) => this.setAgentLayerEntry("disableDefaultAgents", value, "global"),
       setAgentToolStrictMode: (value: boolean) => this.setAgentLayerEntry("agentToolStrictMode", value, "global"),
       setExposeDescriptions: (value: boolean) => this.setAgentLayerEntry("exposeDescriptions", value, "global"),
@@ -482,12 +486,12 @@ export class ConfigStore {
       },
       setProvider: (key: string, n: number, target: ConfigTarget = "global"): void => {
         this.applyConcurrencyWrite(target, (layer) => {
-          layer.providers = { ...(layer.providers ?? {}), [key]: n };
+          layer.providers = { ...layer.providers, [key]: n };
         });
       },
       setModel: (key: string, n: number, target: ConfigTarget = "global"): void => {
         this.applyConcurrencyWrite(target, (layer) => {
-          layer.models = { ...(layer.models ?? {}), [key]: n };
+          layer.models = { ...layer.models, [key]: n };
         });
       },
       removeProvider: (key: string, target: ConfigTarget | "all" = "global"): void => {

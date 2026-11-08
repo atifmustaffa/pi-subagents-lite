@@ -10,9 +10,10 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AgentRecord } from "../types.js";
-import { SHORT_ID_LENGTH } from "../types.js";
-import { getManager, getStore } from "../shell.js";
+import type { SubagentAgentManager } from "./subagent-context.ts";
+import type { AgentRecord } from "../types.ts";
+import { SHORT_ID_LENGTH } from "../types.ts";
+import { getManager, getStore } from "../shell.ts";
 
 function formatAgent(record: AgentRecord): string {
   const shortId = record.id.slice(0, SHORT_ID_LENGTH);
@@ -34,10 +35,10 @@ function bySettledDesc(a: AgentRecord, b: AgentRecord): number {
 
 /**
  * List text for non-empty agents: every in-progress agent in manager order, then
- * at most `limit` settled agents most-recently-settled first, with a summary
- * line when settled agents are hidden.
+ * at most `limit` settled agents most-recently-settled first, with a summary line
+ * when settled agents are hidden. Shared with MessageAgent's not-found report.
  */
-function formatAgentStatusList(agents: AgentRecord[], limit: number): string {
+export function formatAgentStatusList(agents: AgentRecord[], limit: number): string {
   const active: AgentRecord[] = [];
   const settled: AgentRecord[] = [];
   for (const record of agents) {
@@ -62,11 +63,17 @@ export async function executeAgentStatusTool(
   _signal: AbortSignal | undefined,
   _onUpdate: ((update: any) => void) | undefined,
   _ctx: ExtensionContext,
+  receivesCompletionNotifications = true,
+  managerOverride?: Pick<SubagentAgentManager, "listAgents">,
+  agentStatusLimit?: number,
 ): Promise<any> {
-  const manager = getManager()!;
+  const manager = managerOverride ?? getManager();
+  if (!manager) throw new Error("Agent manager is unavailable");
   const agents = manager.listAgents();
 
-  const nudge = "Don't poll — you'll receive notifications when agents complete.";
+  const nudge = receivesCompletionNotifications
+    ? "Don't poll — you'll receive notifications when agents complete."
+    : "Don't poll — completion notifications are delivered to the parent agent.";
 
   if (agents.length === 0) {
     return {
@@ -74,7 +81,7 @@ export async function executeAgentStatusTool(
     };
   }
 
-  const listText = formatAgentStatusList(agents, getStore().agent.agentStatusLimit);
+  const listText = formatAgentStatusList(agents, agentStatusLimit ?? getStore().agent.agentStatusLimit);
   return {
     content: [{ type: "text", text: `${listText}\n\n${nudge}` }],
   };

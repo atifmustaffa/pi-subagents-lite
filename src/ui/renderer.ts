@@ -1,11 +1,14 @@
 /**
- * renderer.ts — Rendering helpers for the Agent tool and subagent-result messages.
+ * renderer.ts — Rendering helpers for the Agent tool and subagent messages.
  *
  * Extracted from index.ts to separate display concerns from extension wiring.
  */
 
-import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
-import type { Theme } from "./types.js";
+import { Box, Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
+import type { SubagentMessageDetails } from "../agents/parent-message.ts";
+import type { Theme } from "./types.ts";
 import {
   buildStatsParts,
   formatMs,
@@ -13,8 +16,8 @@ import {
   buildModelThinkingTag,
   resolveModelLabel,
   statusIcon,
-} from "./format.js";
-import { getManager } from "../shell.js";
+} from "./format.ts";
+import { getManager } from "../shell.ts";
 
 // --- Stats rendering helpers ---
 
@@ -166,7 +169,7 @@ export function renderAgentToolResult(
   theme: Theme,
   showCost: boolean,
   modelDisplayStyle: "id" | "name" = "id",
-  context?: { state?: Record<string, unknown>; executionStarted?: boolean },
+  _context?: { state?: Record<string, unknown>; executionStarted?: boolean },
 ): Text {
   const { expanded } = options;
   const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
@@ -195,6 +198,71 @@ export function renderAgentToolResult(
   return new Text(desc ? `  ${theme.fg("text", desc)}` : "", 0, 0);
 }
 
+/**
+ * Result row for the agent tools that report one status line (StopAgent, MessageAgent):
+ * pi's result text with the success/error mark. The mark comes from pi's render context,
+ * not the result, because a thrown error reaches here as a failed call.
+ */
+export function renderStatusLine(
+  result: { content: Array<{ type: string; text?: string }> },
+  _options: { expanded?: boolean },
+  theme: Theme,
+  context?: { isError?: boolean },
+): Text {
+  const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
+  const icon = context?.isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
+  return new Text(`${icon} ${text}`, 0, 0);
+}
+
+/** Render parent-directed input using the originating agent's task heading. */
+export function renderSubagentMessage(
+  message: { content?: string | (TextContent | ImageContent)[]; details?: SubagentMessageDetails },
+  theme: Theme,
+  modelDisplayStyle: "id" | "name" = "id",
+  showCost = false,
+): Container {
+  const text =
+    typeof message.content === "string"
+      ? message.content
+      : (message.content ?? [])
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+  const sender = message.details?.sender;
+  const header = sender ? `[Subagent "${sender}" message]\n\n` : "";
+  const type = message.details?.type ?? "";
+  const description = message.details?.description ?? sender ?? "";
+  const name = getDisplayName(type, type || "Agent");
+  const label = `Message from ${name || "Agent"}`;
+
+  const title = `${statusIcon("running", theme, type)} ${theme.fg("accent", theme.bold(label))}`;
+  const tag = modelTag(
+    {
+      modelName: message.details?.modelName,
+      modelId: message.details?.modelId,
+      thinkingLevel: message.details?.thinkingLevel,
+    },
+    theme,
+    modelDisplayStyle,
+  );
+  const body = header && text.startsWith(header) ? text.slice(header.length) : text;
+  const stats = message.details?.turnCount != null ? buildStatsLine(message.details, theme, showCost) : "";
+  const metadata = [tag && theme.fg("dim", tag), stats].filter(Boolean).join("·");
+  const heading = [title, metadata && `  ${metadata}`, description && `  ${theme.fg("text", description)}`]
+    .filter(Boolean)
+    .join("\n");
+
+  const container = new Container();
+  container.addChild(new Text(heading, 0, 0));
+  container.addChild(new Spacer(1));
+  container.addChild(
+    new Markdown(body, 0, 0, getMarkdownTheme(), {
+      color: (text) => theme.fg("customMessageText", text),
+    }),
+  );
+  return container;
+}
+
 // --- Message renderer — subagent-result ---
 
 /** Render a subagent-result message injected after background agent completion. */
@@ -221,11 +289,12 @@ export function renderSubagentResult(
 
     const namePart = agentNameLabel(d, theme, modelDisplayStyle);
     const statsLine = buildStatsLine(d, theme, showCost);
-    let headerLine = `${icon} ${namePart}·${statsLine}\n  ${theme.fg("text", (d.description as string) || "")}`;
-    if (d.outputFile as string) {
+    const description = typeof d.description === "string" ? d.description : "";
+    let headerLine = `${icon} ${namePart}·${statsLine}\n  ${theme.fg("text", description)}`;
+    if (typeof d.outputFile === "string" && d.outputFile) {
       headerLine += `\n  ${theme.fg("dim", `tail -f ${d.outputFile}`)}`;
     }
-    if (d.worktreePath as string) {
+    if (typeof d.worktreePath === "string" && d.worktreePath) {
       headerLine += `\n  ${theme.fg("dim", `worktree: ${d.worktreePath}`)}`;
     }
     inner.addChild(new Text(headerLine, 0, 0));
@@ -267,12 +336,12 @@ function buildFallbackResultLine(
   if (d?.type) {
     line += ` ${agentNameLabel(d, theme, modelDisplayStyle)}`;
   }
-  const desc = (d?.description as string) || "";
+  const desc = typeof d?.description === "string" ? d.description : "";
   if (desc) line += `\n  ${theme.fg("text", desc)}`;
-  if (d?.outputFile) {
+  if (typeof d?.outputFile === "string" && d.outputFile) {
     line += `\n  ${theme.fg("dim", `tail -f ${d.outputFile}`)}`;
   }
-  if (d?.worktreePath) {
+  if (typeof d?.worktreePath === "string" && d.worktreePath) {
     line += `\n  ${theme.fg("dim", `worktree: ${d.worktreePath}`)}`;
   }
   return line;

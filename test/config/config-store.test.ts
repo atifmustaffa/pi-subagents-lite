@@ -10,10 +10,9 @@
  * config-store-widget-sync.test.ts.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vite-plus/test";
 import { ConfigStore } from "../../src/config/config-store.js";
 import type { ConfigIO } from "../../src/config/config-store.js";
-import type { RawConfig } from "../../src/config/config-io.js";
 import { memIO, minimalIO, widgetStub, managerStub, statsVisibilityPayloads } from "./config-store-helpers.js";
 
 /* ------------------------------------------------------------------ */
@@ -729,6 +728,7 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.includeContextFiles).toBe(true);
     expect(store.agent.loadSkillsImplicitly).toBe(true);
     expect(store.agent.loadExtensionsImplicitly).toBe(true);
+    expect(store.agent.loadToolsImplicitly).toBe(true);
     expect(store.agent.disableDefaultAgents).toBe(false);
   });
 
@@ -756,6 +756,7 @@ describe("ConfigStore agent properties", () => {
 
           loadSkillsImplicitly: false,
           loadExtensionsImplicitly: false,
+          loadToolsImplicitly: false,
           disableDefaultAgents: true,
         },
       },
@@ -768,6 +769,7 @@ describe("ConfigStore agent properties", () => {
 
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
+    expect(store.agent.loadToolsImplicitly).toBe(false);
     expect(store.agent.disableDefaultAgents).toBe(true);
   });
 
@@ -781,6 +783,7 @@ describe("ConfigStore agent properties", () => {
     store.mutate.agent.setDefaultMaxTurns(30);
     store.mutate.agent.setLoadSkillsImplicitly(false);
     store.mutate.agent.setLoadExtensionsImplicitly(false);
+    store.mutate.agent.setLoadToolsImplicitly(false);
     store.mutate.agent.setDisableDefaultAgents(true);
 
     expect(store.agent.includeContextFiles).toBe(false);
@@ -789,8 +792,9 @@ describe("ConfigStore agent properties", () => {
     expect(store.agent.defaultMaxTurns).toBe(30);
     expect(store.agent.loadSkillsImplicitly).toBe(false);
     expect(store.agent.loadExtensionsImplicitly).toBe(false);
+    expect(store.agent.loadToolsImplicitly).toBe(false);
     expect(store.agent.disableDefaultAgents).toBe(true);
-    expect(saves).toHaveLength(7);
+    expect(saves).toHaveLength(8);
   });
 
   it("setDefaultThinking/MaxTurns(undefined) removes the field", () => {
@@ -818,6 +822,7 @@ describe("ConfigStore agent properties", () => {
           defaultMaxTurns: 25,
           loadSkillsImplicitly: false,
           loadExtensionsImplicitly: false,
+          loadToolsImplicitly: false,
           disableDefaultAgents: true,
           showTools: false,
           Explore: "m1",
@@ -836,6 +841,7 @@ describe("ConfigStore agent properties", () => {
 
     expect(snap.loadSkillsImplicitly).toBe(false);
     expect(snap.loadExtensionsImplicitly).toBe(false);
+    expect(snap.loadToolsImplicitly).toBe(false);
     expect(snap.disableDefaultAgents).toBe(true);
     expect(snap.showTools).toBe(false);
     expect(snap.Explore).toBeUndefined();

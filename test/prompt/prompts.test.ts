@@ -2,7 +2,7 @@
  * prompts.test.ts — Tests for system prompt building with skills.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { buildAgentPrompt } from "../../src/prompt/prompts.js";
 import type { AgentConfig } from "../../src/agents/types.js";
 import type { EnvInfo } from "../../src/types.js";
@@ -207,6 +207,14 @@ describe("buildAgentPrompt — system prompt modes", () => {
 
     expect(result).toContain("You are a Pi, an expert coding sub-agent.");
     expect(result).toContain("You have been invoked to handle a specific task autonomously.");
+  });
+});
+
+describe("buildAgentPrompt — cache prefix", () => {
+  it("keeps the prompt prefix shared across agent identities for prompt caching", () => {
+    const first = buildAgentPrompt(baseConfig, "/test/cwd", env);
+    const second = buildAgentPrompt({ ...baseConfig, name: "other-agent" }, "/test/cwd", env);
+    expect(first.split("<active_agent")[0]).toBe(second.split("<active_agent")[0]);
   });
 });
 

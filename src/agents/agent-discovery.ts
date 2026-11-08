@@ -12,9 +12,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { AgentConfig } from "./types.js";
-import type { ThinkingLevel } from "../types.js";
-import { parseThinkingLevel } from "../utils.js";
+import type { AgentConfig } from "./types.ts";
+import type { ThinkingChoice } from "../types.ts";
+import { parseThinkingChoice } from "../utils.ts";
 
 // --- Types ---
 
@@ -30,7 +30,7 @@ export interface AgentConfigFromMd {
   preload_skills?: string[] | false;
   color?: string;
   model?: string;
-  thinking?: ThinkingLevel;
+  thinking?: ThinkingChoice;
   max_turns?: number;
   max_tokens?: number;
   hidden?: boolean;
@@ -224,7 +224,7 @@ function parseNumber(frontmatter: Record<string, unknown>, key: string): number 
 }
 
 function compactDefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  return Object.fromEntries(Object.entries(obj).filter(([_, v]) => v !== undefined)) as Partial<T>;
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
 // --- parseAgentFile ---
@@ -244,7 +244,7 @@ export function parseAgentFile(content: string, source: "user" | "project"): Age
     preload_skills: parsePreloadSkills(frontmatter.preload_skills),
     color: parseString(frontmatter, "color"),
     model: parseString(frontmatter, "model"),
-    thinking: parseThinkingLevel(parseString(frontmatter, "thinking")),
+    thinking: parseThinkingChoice(parseString(frontmatter, "thinking")),
     max_turns: parseNumber(frontmatter, "max_turns"),
     max_tokens: parseNumber(frontmatter, "max_tokens"),
     hidden: parseBoolean(frontmatter, "hidden"),

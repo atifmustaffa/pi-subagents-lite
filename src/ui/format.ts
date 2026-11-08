@@ -11,14 +11,14 @@
  * via getStore() and disable agent-specific coloring globally.
  */
 
-import { getAgentConfig } from "../agents/agent-types.js";
-import { agentColorAnsi } from "../agent-color.js";
-import { getStore } from "../shell.js";
-import type { SubagentType, AgentInvocation } from "../agents/types.js";
-import type { AgentRecord, AgentStatus } from "../types.js";
-import type { Theme } from "./types.js";
-import { formatTokens, formatCost } from "../agents/usage.js";
-import type { ModelThinkingPlacement } from "../config/types.js";
+import { getAgentConfig } from "../agents/agent-types.ts";
+import { agentColorAnsi } from "../agent-color.ts";
+import { getStore } from "../shell.ts";
+import type { SubagentType, AgentInvocation } from "../agents/types.ts";
+import type { AgentRecord, AgentStatus } from "../types.ts";
+import type { Theme } from "./types.ts";
+import { formatTokens, formatCost } from "../agents/usage.ts";
+import type { ModelThinkingPlacement } from "../config/types.ts";
 
 // ---- Agent color toggle ----
 
@@ -87,7 +87,8 @@ export function formatSessionTokens(
     annot.push(theme.fg("dim", `↻ ${compactions}`));
   }
   if (annot.length === 0) return tokenStr;
-  return `${tokenStr} ${annot.join(" ")}`;
+  const annotationStr = annot.join(" ");
+  return tokenStr ? `${tokenStr} ${annotationStr}` : annotationStr;
 }
 
 /** Format turn count with optional max limit. Shows max when >= 80% of limit. */
@@ -155,22 +156,12 @@ export function buildStatsParts(
   if (visible?.showTools !== false && args.toolUses > 0) parts.push(`${args.toolUses}⚒ `);
   if (visible?.showTurns !== false && args.turnCount != null)
     parts.push(formatTurns(args.turnCount, args.maxTurns, theme));
-  if (visible?.showInput !== false || visible?.showOutput !== false) {
-    const showIn = visible?.showInput !== false;
-    const showOut = visible?.showOutput !== false;
-    const inputTokens = showIn ? args.input : 0;
-    const outputTokens = showOut ? args.output : 0;
-    if (inputTokens > 0 || outputTokens > 0) {
-      parts.push(
-        formatSessionTokens(
-          inputTokens,
-          outputTokens,
-          visible?.showContext !== false ? args.contextPercent : null,
-          theme,
-          visible?.showContext !== false ? args.compactions : 0,
-        ),
-      );
-    }
+  const inputTokens = visible?.showInput !== false ? args.input : 0;
+  const outputTokens = visible?.showOutput !== false ? args.output : 0;
+  const contextPercent = visible?.showContext !== false ? args.contextPercent : null;
+  const compactions = visible?.showContext !== false ? args.compactions : 0;
+  if (inputTokens > 0 || outputTokens > 0 || contextPercent !== null || compactions > 0) {
+    parts.push(formatSessionTokens(inputTokens, outputTokens, contextPercent, theme, compactions));
   }
   if (visible?.showCost !== false && args.cost != null && args.cost > 0) parts.push(formatCost(args.cost));
   if (visible?.showTime !== false && args.durationMs != null) parts.push(formatMs(args.durationMs));
@@ -178,9 +169,9 @@ export function buildStatsParts(
 }
 
 /** Get display name for any agent type (built-in or custom). */
-export function getDisplayName(type: SubagentType): string {
+export function getDisplayName(type: SubagentType, fallback = "Agent"): string {
   const config = getAgentConfig(type);
-  return config?.displayName ?? config?.name ?? "Agent";
+  return config?.displayName ?? config?.name ?? fallback;
 }
 
 /** Colored bullet prefix for agent names in pickers/menus.

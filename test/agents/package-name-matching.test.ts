@@ -7,7 +7,7 @@
  * Port from pi-subagents #143.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vite-plus/test";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -269,6 +269,42 @@ describe("malformed package.json", () => {
     });
     // Should not crash, and should match by path-derived name
     expect(result.extensions).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Built-in extensions — bare-name matching                           */
+/* ------------------------------------------------------------------ */
+
+describe("built-in extension matching by bare name", () => {
+  const builtinPath = "builtin:codemode";
+
+  it("whitelist matches a built-in by its bare name", () => {
+    const override = buildExtOverride(["codemode"], undefined, undefined);
+    const result = override!({
+      extensions: [
+        { path: builtinPath, tools: new Map([["codemode", {}]]) },
+        { path: "/home/test/.pi/agent/extensions/tavily/index.ts", tools: new Map([["web_search", {}]]) },
+      ],
+      errors: [],
+      runtime: {},
+    });
+    expect(result.extensions).toHaveLength(1);
+    expect(result.extensions[0].path).toBe(builtinPath);
+  });
+
+  it("excludeExtensions removes a built-in by its bare name", () => {
+    const override = buildExtOverride(true, ["codemode"], undefined);
+    const result = override!({
+      extensions: [
+        { path: builtinPath, tools: new Map([["codemode", {}]]) },
+        { path: "/home/test/.pi/agent/extensions/tavily/index.ts", tools: new Map([["web_search", {}]]) },
+      ],
+      errors: [],
+      runtime: {},
+    });
+    expect(result.extensions).toHaveLength(1);
+    expect(result.extensions[0].path).not.toBe(builtinPath);
   });
 });
 

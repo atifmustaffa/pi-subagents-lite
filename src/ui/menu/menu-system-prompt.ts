@@ -11,11 +11,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SettingsList, type SettingItem } from "@earendil-works/pi-tui";
-import { buildSettingsListTheme } from "./helpers.js";
-import { SettingsListWrapper } from "./wrappers/settings-list.js";
-import type { SystemPromptMode } from "../../agents/types.js";
-import { getStore } from "../../shell.js";
-import { CUSTOM_PROMPT_PATH } from "../../config/config-io.js";
+import { buildSettingsListTheme } from "./helpers.ts";
+import { SettingsListWrapper } from "./wrappers/settings-list.ts";
+import type { SystemPromptMode } from "../../agents/types.ts";
+import { getStore } from "../../shell.ts";
+import { CUSTOM_PROMPT_PATH } from "../../config/config-io.ts";
 
 export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promise<void> {
   const store = getStore();
@@ -64,6 +64,14 @@ export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promis
         values: ["ON", "OFF"],
         description: "Give new agents all extensions when frontmatter omits the field.",
       },
+      {
+        id: "loadToolsImplicitly",
+        label: "Load tools implicitly",
+        currentValue: store.agent.loadToolsImplicitly ? "ON" : "OFF",
+        values: ["ON", "OFF"],
+        description:
+          "ON: pi applies its defaultTools setting to new agents. OFF: new agents start with no tools when frontmatter omits tool fields.",
+      },
     );
 
     return items;
@@ -105,6 +113,10 @@ export async function showSystemPromptMenu(ctx: ExtensionCommandContext): Promis
       case "loadExtensionsImplicitly":
         store.mutate.agent.setLoadExtensionsImplicitly(newValue === "ON");
         ctx.ui.notify(`Load extensions implicitly set to ${newValue}`, "info");
+        break;
+      case "loadToolsImplicitly":
+        store.mutate.agent.setLoadToolsImplicitly(newValue === "ON");
+        ctx.ui.notify(`Load tools implicitly set to ${newValue}`, "info");
         break;
     }
   };

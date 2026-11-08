@@ -7,7 +7,7 @@
  * (tool result content) not internal call order.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vite-plus/test";
 import { fakeCtx, makeResolvablePromise } from "../fixtures.js";
 import { asExtensionContext } from "../pi-boundaries.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -70,7 +70,7 @@ vi.mock("../../src/agents/agent-types.js", () => ({
 vi.mock("../../src/utils.js", () => ({
   parseModelKey: vi.fn(() => null),
   resolveRequestedModel: vi.fn(() => null),
-  parseThinkingLevel: vi.fn(() => undefined),
+  parseThinkingChoice: vi.fn(() => undefined),
 }));
 
 vi.mock("../../src/shell.js", () => ({
@@ -100,10 +100,6 @@ vi.mock("../../src/shell.js", () => ({
   getCoordinator: () => ({
     spawn: vi.fn(async (pi: ExtensionAPI, ctx: ExtensionContext, intent: SpawnIntent) => {
       // Delegate to the mocked manager.spawn
-      const manager = {
-        spawn: mockSpawn,
-        getRecord: mockGetRecord,
-      };
       const id = mockSpawn(pi, ctx, intent.type, intent.prompt, {
         description: intent.description,
         model: intent.model,
@@ -121,7 +117,7 @@ vi.mock("../../src/shell.js", () => ({
       if (!intent.runInBackground && record?.execution?.promise) {
         await record.execution.promise;
       }
-      return { agentId: id, record };
+      return { agentId: id, record, isBackground: intent.runInBackground };
     }),
     isBackground: vi.fn(() => false),
     scheduleNudge: vi.fn(),
